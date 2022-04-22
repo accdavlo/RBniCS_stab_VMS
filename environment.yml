@@ -1,0 +1,9 @@
+name: fenics-2018
+dependencies:
+  - python=3.7
+  - ipython
+  - jupyter
+  - fenics=2018
+  - mshr=2018
+  - matplotlib
+  - scipy
