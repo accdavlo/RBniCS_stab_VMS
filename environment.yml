@@ -1,4 +1,4 @@
-name: base
+name: fenics-2018
 channels:
   - defaults
 dependencies:
