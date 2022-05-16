@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 # Print log messages only from the root process in parallel
 parameters["std_out_all_processes"] = False;
 
-linear_implicit = False
+linear_implicit = True
 
 with_plot = True
 # Set parameter values
@@ -169,11 +169,12 @@ for i in range(1,K):
             solver.solve()
     # Store the solution in up_prev
     up_diff.assign(up - up_prev)
-    res = up_diff.vector().norm('l2')
+    diff_norm = up_diff.vector().norm('l2')
+    res = norm(assemble(F))
 
     assign(up_prev, up)
 
-    print(f"Residual {res}")
+    print(f"Residual {res}, step norm {diff_norm}")
     # Plot
     (u, p) = up.split()
     if (i/sav_ts).is_integer():
