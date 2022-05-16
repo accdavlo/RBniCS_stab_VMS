@@ -88,6 +88,7 @@ J = derivative(F, up)
 snes_solver_parameters = {"nonlinear_solver":"snes",
                           "snes_solver": {"method" : "ngmres",
                                           "linear_solver": "mumps",
+                                          "maximum_residual_evaluations":10000,
                                           "maximum_iterations": 1000,
                                           "report": True,
                                           "error_on_nonconvergence": False}
