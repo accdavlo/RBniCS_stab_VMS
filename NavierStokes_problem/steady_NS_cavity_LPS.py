@@ -11,7 +11,7 @@ parameters["std_out_all_processes"] = False;
 
 
 # Set parameter values
-Re= Constant(600. )
+Re= Constant(3000. )
 nu = Constant(1./Re)
 f = Constant((0., 0.))
 u_top = Constant(1.)
@@ -19,7 +19,7 @@ u_top = Constant(1.)
 # Create mesh
 square = Rectangle(Point(0., 0.), Point(1., 1.))
 
-Nx=100
+Nx=50
 mesh = generate_mesh(square,Nx)
 
 degree_poly=2
@@ -85,15 +85,32 @@ J = derivative(F, up)
 
 
 # Prepare nonlinear solver
-snes_solver_parameters = {"nonlinear_solver": "snes",
-                          "snes_solver": {"linear_solver": "mumps",
-                                          "maximum_iterations": 20,
+snes_solver_parameters = {"nonlinear_solver":"snes",
+                          "snes_solver": {"method" : "ngmres",
+                                          "linear_solver": "mumps",
+                                          "maximum_iterations": 1000,
                                           "report": True,
-                                          "error_on_nonconvergence": True}}
+                                          "error_on_nonconvergence": False}
+                          }
+
+# Rey = 3000
+# newtonls not converging (slow)
+# basic not converging (slow)
+# nrichardson diverges
+# qn oscillatory , convergence really slow and oscillatory
+# ncg diverges (fast)
+# ngmres slowly slowly converging? I stopped at 200 iter 1.27e-02, 500 iter 4.2e-03, 1000 iter 2.1e-03 
+# fas segmentation fault
+# nasm error
+# aspin error
+# ngs error
+# anderson fast but sloooowly converging. 200 iter 1.87e-02, iter 500 err 4e-03, iter 1000 2e-03, 1500 1.9e-03, 2000 1.5e-03
+# ms too slow, not seeing anything
+# composite segmentation fault error
 
 problem = NonlinearVariationalProblem(F, up, bcs, J)
 solver  = NonlinearVariationalSolver(problem)
-#solver.parameters.update(snes_solver_parameters)
+solver.parameters.update(snes_solver_parameters)
 
 # Export the initial solution (zero)
 outfile_u = File("lid-driven_cavity/u.pvd")
@@ -101,14 +118,18 @@ outfile_p = File("lid-driven_cavity/p.pvd")
 outfile_ld = File("lid-driven_cavity/ld.pvd")
 
 solver.solve()
+
+
+
 # Plot
+
 (u, p) = up.split()
 outfile_u << u
 outfile_p << p
 
-plt.figure()
-pp=plot(p); plt.colorbar(pp)
-plt.title("Pressure")
+plt.figure();
+pp=plot(p); plt.colorbar(pp);
+plt.title("Pressure");
 plt.show(block=False)
 
 plt.figure()
