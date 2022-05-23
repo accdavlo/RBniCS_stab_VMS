@@ -24,8 +24,8 @@ Nx=100
 mesh = generate_mesh(square,Nx)
 
 # XXX Time discretization
-dt = 0.01
-T = 10.
+dt = 0.03
+T = 100.
 
 degree_poly=2
 scalar_element = FiniteElement("CG", mesh.ufl_cell(), degree_poly)
@@ -96,17 +96,22 @@ tau_p = tau_v
 
 tau_d = project((h/degree_poly)**2/c1*tau_den,V0)
 
-if linear_implicit:
-    b_form = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u))\
-                + 0.5*(inner(dot(u_pred,grad(u)),v)       + inner(dot(u_pred,grad(v)),u) ))*dx
-    s_conv = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(u_prev))))\
-                + tau_v*inner(sigma_star(dot(u_pred,grad(u))),sigma_star(dot(u_pred,grad(v)))))  *dx
+b_form_lin = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u))\
+            + 0.5*(inner(dot(u_pred,grad(u)),v)       + inner(dot(u_pred,grad(v)),u) ))*dx
+s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(u_prev))))\
+            + tau_v*inner(sigma_star(dot(u_pred,grad(u))),sigma_star(dot(u_pred,grad(v)))))  *dx
 
+b_form_nl = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u_prev)) \
+            + 0.5*(inner(dot(u,grad(u)),v)  + inner(dot(u,grad(v)),u)) )*dx
+s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(v))))\
+            + tau_v*inner(sigma_star(dot(u,grad(u))),sigma_star(dot(u,grad(v))))  ) *dx
+
+if linear_implicit:
+    b_form = b_form_lin
+    s_conv = s_conv_lin
 else:
-    b_form = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u_prev)) \
-                + 0.5*(inner(dot(u,grad(u)),v)  + inner(dot(u,grad(v)),u)) )*dx
-    s_conv = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(v))))\
-                + tau_v*inner(sigma_star(dot(u,grad(u))),sigma_star(dot(u,grad(v))))  ) *dx
+    b_form = b_form_nl
+    s_conv = s_conv_nl
 
 a_form = nu*inner(sym(grad(u+u_prev)),sym(grad(v)))*dx
 
@@ -116,7 +121,6 @@ s_pres = 0.5*(tau_p*inner(sigma_star(grad(p+p_prev)),sigma_star(grad(q)))) *dx
 
 F = inner((u-u_prev)/dt,v)*dx + b_form + a_form - 0.5*inner(p+p_prev,div(v))*dx+ s_div\
     +s_conv + 0.5*inner(div(u+u_prev),q)*dx + s_pres
-
 
 if linear_implicit:
     ll = lhs(F)
@@ -136,6 +140,41 @@ else:
     problem = NonlinearVariationalProblem(F, up, bcs, J)
     solver  = NonlinearVariationalSolver(problem)
     #solver.parameters.update(snes_solver_parameters)
+
+
+
+tau_den = c1*(nu)/(h/degree_poly)**2+c2*project(sqrt(u_prev[0]**2+u_prev[1]**2),V0)/(h/degree_poly)
+tau_v    = project(1./(1./dt+tau_den),V0)
+tau_p = tau_v
+
+tau_d = project((h/degree_poly)**2/c1*tau_den,V0)
+
+b_form_lin = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u))\
+            + 0.5*(inner(dot(u_pred,grad(u)),v)       + inner(dot(u_pred,grad(v)),u) ))*dx
+s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(u_prev))))\
+            + tau_v*inner(sigma_star(dot(u_pred,grad(u))),sigma_star(dot(u_pred,grad(v)))))  *dx
+
+b_form_nl = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u_prev)) \
+            + 0.5*(inner(dot(u,grad(u)),v)  + inner(dot(u,grad(v)),u)) )*dx
+s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(v))))\
+            + tau_v*inner(sigma_star(dot(u,grad(u))),sigma_star(dot(u,grad(v))))  ) *dx
+
+if linear_implicit:
+    b_form = b_form_lin
+    s_conv = s_conv_lin
+else:
+    b_form = b_form_nl
+    s_conv = s_conv_nl
+
+a_form = nu*inner(sym(grad(u+u_prev)),sym(grad(v)))*dx
+
+
+s_div  = 0.5*(tau_d*inner(sigma_star(div(u+u_prev)),sigma_star(div(v)))) *dx
+s_pres = 0.5*(tau_p*inner(sigma_star(grad(p+p_prev)),sigma_star(grad(q)))) *dx
+
+
+F_lim = inner((u-u_prev)/dt,v)*dx + b_form_nl + a_form - 0.5*inner(p+p_prev,div(v))*dx+ s_div\
+    +s_conv_nl + 0.5*inner(div(u+u_prev),q)*dx + s_pres
 
 # Export the initial solution (zero)
 outfile_u = File("lid-driven_cavity_unsteady/u.pvd")
@@ -170,7 +209,7 @@ for i in range(1,K):
     # Store the solution in up_prev
     up_diff.assign(up - up_prev)
     diff_norm = up_diff.vector().norm('l2')
-    res = norm(assemble(F))
+    res = norm(assemble(F_lim))
 
     assign(up_prev, up)
 
