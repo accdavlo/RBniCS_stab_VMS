@@ -20,14 +20,14 @@ u_top = Constant(1.)
 # Create mesh
 square = Rectangle(Point(0., 0.), Point(1., 1.))
 
-Nx=50
+Nx=100
 mesh = generate_mesh(square,Nx)
 
 # XXX Time discretization
 dt = 0.03
-T = 1.
+T = 10.
 
-degree_poly=2
+degree_poly=1
 scalar_element = FiniteElement("CG", mesh.ufl_cell(), degree_poly)
 vector_element = VectorElement("CG", mesh.ufl_cell(), degree_poly)
 system_element = MixedElement( vector_element , scalar_element )
@@ -189,9 +189,9 @@ s_pres = 0.5*(tau_p*inner(sigma_star(grad(p_sol+p_prev)),sigma_star(grad(q)))) *
 F_lim =define_form(up_sol,up_sol, up_sol,vq)
 
 # Export the initial solution (zero)
-outfile_u = File("lid-driven_cavity_unsteady/u.pvd")
-outfile_p = File("lid-driven_cavity_unsteady/p.pvd")
-outfile_ld = File("lid-driven_cavity_unsteady/ld.pvd")
+outfile_u = File("lid-driven_cavity_unsteady_new/u.pvd")
+outfile_p = File("lid-driven_cavity_unsteady_new/p.pvd")
+outfile_ld = File("lid-driven_cavity_unsteady_new/ld.pvd")
 
 (u_sol,p_sol) = up_sol.split()
 outfile_u << u_sol
@@ -229,7 +229,7 @@ for i in range(1,K):
             up_sol.assign(up)
     # Store the solution in up_prev
     up_diff.assign(up_sol - up_prev)
-    diff_norm = up_diff.vector().norm('l2')
+    diff_norm = assemble(inner(up_diff,up_diff)*dx)
     F_lim =define_form(up_sol,up_sol, up_sol,vq)
     res = norm(assemble(F_lim))
 
