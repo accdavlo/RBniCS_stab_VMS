@@ -2,8 +2,9 @@ from dolfin import *
 from ufl.geometry import *
 from dolfin.cpp.mesh import *
 from mshr import *
-
+from problems import Problem
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Print log messages only from the root process in parallel
 parameters["std_out_all_processes"] = False;
@@ -11,21 +12,24 @@ parameters["std_out_all_processes"] = False;
 linear_implicit = True
 
 with_plot = True
-# Set parameter values
-Re= Constant(1000. )
-nu = Constant(1./Re)
-f = Constant((0., 0.))
-u_top = Constant(1.)
 
 # Create mesh
-square = Rectangle(Point(0., 0.), Point(1., 1.))
+Nx=50
+problem_name = "cylinder"#"lid-driven_cavity"
+problem = Problem(problem_name, Nx)
+mesh = problem.mesh
 
-Nx=100
-mesh = generate_mesh(square,Nx)
+
+# Set parameter values
+Re= Constant(1. )
+nu = Constant(1./Re)
+f = Constant((0., 0.))
+u_top = Constant(10.)
+
 
 # XXX Time discretization
-dt = 0.03
-T = 10.
+dt = 0.01
+T = 20.
 
 degree_poly=1
 scalar_element = FiniteElement("CG", mesh.ufl_cell(), degree_poly)
@@ -58,25 +62,10 @@ up_diff = Function(W)
 vq = TestFunction(W)
 (v, q)  = split(vq)
 
+up_sol = Function(W)
+(u_sol, p_sol) = split(up_sol)
 
-# Define boundary conditions
-noslip  = DirichletBC(W.sub(0), (0, 0),
-                      "on_boundary && \
-                       (x[0] < DOLFIN_EPS | x[1] < DOLFIN_EPS | \
-                        x[0] > 1.0 - DOLFIN_EPS)")
-inflow  = DirichletBC(W.sub(0), (u_top, 0), "x[1] > 1.0 - DOLFIN_EPS")
-#outflow = DirichletBC(Q, 0, "x[0] > 1.0 - DOLFIN_EPS")
-
-class CenterDomain(SubDomain):
-    def inside(self, x, on_boundary):
-        return near(x[0], 0.5, DOLFIN_EPS) and near(x[1], 0.5, DOLFIN_EPS)
-center_domain = CenterDomain()
-
-g2 = Constant(0.)
-bc_one_point = DirichletBC(W.sub(1), g2, center_domain, method='pointwise')
-
-
-bcs = [noslip, inflow, bc_one_point]
+bcs = problem.define_bc(W, u_top)
 
 
 # Define the forms
@@ -134,64 +123,12 @@ def define_form(up,up_pred, up_prev,vq):
 
     return F
 
-F = define_form(up,up_pred, up_prev,vq)
 
-if linear_implicit:
-    ll = lhs(F)
-    rr = rhs(F)
-
-
-else:
-    J = derivative(F, up)
-    # Prepare nonlinear solver
-    snes_solver_parameters = {"nonlinear_solver": "snes",
-                              "snes_solver": {"linear_solver": "mumps",
-                                              "maximum_iterations": 20,
-                                              "report": True,
-                                              "error_on_nonconvergence": True}}
-
-    problem = NonlinearVariationalProblem(F, up, bcs, J)
-    solver  = NonlinearVariationalSolver(problem)
-    #solver.parameters.update(snes_solver_parameters)
-
-up_sol = Function(W)
-(u_sol, p_sol) = split(up_sol)
-
-tau_den = c1*(nu)/(h/degree_poly)**2+c2*project(sqrt(u_prev[0]**2+u_prev[1]**2),V0)/(h/degree_poly)
-tau_v    = project(1./(1./dt+tau_den),V0)
-tau_p = tau_v
-
-tau_d = project((h/degree_poly)**2/c1*tau_den,V0)
-
-b_form_lin = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u))\
-            + 0.5*(inner(dot(u_pred,grad(u)),v)       + inner(dot(u_pred,grad(v)),u) ))*dx
-s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(u_prev))))\
-            + tau_v*inner(sigma_star(dot(u_pred,grad(u))),sigma_star(dot(u_pred,grad(v)))))  *dx
-
-b_form_nl = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u_prev)) \
-            + 0.5*(inner(dot(u_sol,grad(u_sol)),v)  + inner(dot(u_sol,grad(v)),u_sol)) )*dx
-s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(v))))\
-            + tau_v*inner(sigma_star(dot(u_sol,grad(u_sol))),sigma_star(dot(u_sol,grad(v))))  ) *dx
-
-if linear_implicit:
-    b_form = b_form_lin
-    s_conv = s_conv_lin
-else:
-    b_form = b_form_nl
-    s_conv = s_conv_nl
-
-a_form = nu*inner(sym(grad(u_sol+u_prev)),sym(grad(v)))*dx
-
-
-s_div  = 0.5*(tau_d*inner(sigma_star(div(u_sol+u_prev)),sigma_star(div(v)))) *dx
-s_pres = 0.5*(tau_p*inner(sigma_star(grad(p_sol+p_prev)),sigma_star(grad(q)))) *dx
-
-F_lim =define_form(up_sol,up_sol, up_sol,vq)
 
 # Export the initial solution (zero)
-outfile_u = File("lid-driven_cavity_unsteady_new/u.pvd")
-outfile_p = File("lid-driven_cavity_unsteady_new/p.pvd")
-outfile_ld = File("lid-driven_cavity_unsteady_new/ld.pvd")
+outfile_u = File(problem.name+"_unsteady_new/u.pvd")
+outfile_p = File(problem.name+"_unsteady_new/p.pvd")
+outfile_ld = File(problem.name+"_unsteady_new/ld.pvd")
 
 (u_sol,p_sol) = up_sol.split()
 outfile_u << u_sol
@@ -229,14 +166,16 @@ for i in range(1,K):
             up_sol.assign(up)
     # Store the solution in up_prev
     up_diff.assign(up_sol - up_prev)
-    diff_norm = assemble(inner(up_diff,up_diff)*dx)
-    F_lim =define_form(up_sol,up_sol, up_sol,vq)
+    (u_diff, p_diff) = up_diff.split()
+    u_diff_norm = np.sqrt(assemble(inner(u_diff,u_diff)*dx))/dt
+    p_diff_norm = np.sqrt(assemble(inner(p_diff,p_diff)*dx))/dt
+    F_lim =define_form(up_sol,up_pred, up_prev,vq)
     res = norm(assemble(F_lim))
 
 
     assign(up_prev, up_sol)
 
-    print(f"Residual {res}, step norm {diff_norm}")
+    print(f"Residual {res}, time derivative u {u_diff_norm}, time derivative p {p_diff_norm}")
     # Plot
     (u_sol, p_sol) = up_sol.split()
     if (i/sav_ts).is_integer():
