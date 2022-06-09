@@ -15,23 +15,26 @@ with_plot = True
 
 # Create mesh
 Nx=50
-problem_name = "cylinder"#"lid-driven_cavity"
+problem_name = "lid-driven_cavity"#"cylinder"#"lid-driven_cavity"
 problem = Problem(problem_name, Nx)
 mesh = problem.mesh
 
-
 # Set parameter values
-Re= Constant(1. )
+Re= Constant(10000. )
 nu = Constant(1./Re)
 f = Constant((0., 0.))
-u_top = Constant(10.)
+u_top = Constant(1.)
+
 
 
 # XXX Time discretization
-dt = 0.01
+CFL = 4.
 T = 20.
+dtplot =0.5
+Nt_max = 10000
+dT=Constant(1.)
 
-degree_poly=1
+degree_poly=2
 scalar_element = FiniteElement("CG", mesh.ufl_cell(), degree_poly)
 vector_element = VectorElement("CG", mesh.ufl_cell(), degree_poly)
 system_element = MixedElement( vector_element , scalar_element )
@@ -90,20 +93,20 @@ def define_form(up,up_pred, up_prev,vq):
     (v,q)           = split(vq)
     
     tau_den = c1*(nu)/(h/degree_poly)**2+c2*project(sqrt(u_prev[0]**2+u_prev[1]**2),V0)/(h/degree_poly)
-    tau_v   = project(1./(1./dt+tau_den),V0)
+    tau_v   = project(1./(1./dT+tau_den),V0)
     tau_p   = tau_v
     
     tau_d = project((h/degree_poly)**2/c1*tau_den,V0)
     
-    b_form_lin = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u))\
-                + 0.5*(inner(dot(u_pred,grad(u)),v)       + inner(dot(u_pred,grad(v)),u) ))*dx
-    s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(v))))*dx\
-                + tau_v*inner(sigma_star(dot(u_pred,grad(u))),sigma_star(dot(u_pred,grad(v))))*dx)  
+    b_form_lin = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)  + inner(dot(u_prev,nabla_grad(v)),u))\
+                + 0.5*(inner(dot(u_pred,nabla_grad(u)),v)       + inner(dot(u_pred,nabla_grad(v)),u) ))*dx
+    s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))*dx\
+                + tau_v*inner(sigma_star(dot(u_pred,nabla_grad(u))),sigma_star(dot(u_pred,nabla_grad(v))))*dx)  
     
-    b_form_nl = 0.5*(0.5*(inner(dot(u_prev,grad(u_prev)),v)  + inner(dot(u_prev,grad(v)),u_prev)) \
-                + 0.5*(inner(dot(u,grad(u)),v)  + inner(dot(u,grad(v)),u)) )*dx
-    s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,grad(u_prev))),sigma_star(dot(u_prev,grad(v))))\
-                + tau_v*inner(sigma_star(dot(u,grad(u))),sigma_star(dot(u,grad(v))))  ) *dx
+    b_form_nl = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)  + inner(dot(u_prev,nabla_grad(v)),u_prev)) \
+                + 0.5*(inner(dot(u,nabla_grad(u)),v)  + inner(dot(u,nabla_grad(v)),u)) )*dx
+    s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))\
+                + tau_v*inner(sigma_star(dot(u,nabla_grad(u))),sigma_star(dot(u,nabla_grad(v))))  ) *dx
     
     if linear_implicit:
         b_form = b_form_lin
@@ -118,7 +121,7 @@ def define_form(up,up_pred, up_prev,vq):
     s_div  = 0.5*(tau_d*inner(sigma_star(div(u+u_prev)),sigma_star(div(v)))) *dx
     s_pres = 0.5*(tau_p*inner(sigma_star(grad(p+p_prev)),sigma_star(grad(q)))) *dx
     
-    F = inner((u-u_prev)/dt,v)*dx + b_form + a_form - 0.5*inner(p+p_prev,div(v))*dx+ s_div\
+    F = inner((u-u_prev)/dT,v)*dx + b_form + a_form - 0.5*inner(p+p_prev,div(v))*dx+ s_div\
         +s_conv + 0.5*inner(div(u+u_prev),q)*dx + s_pres
 
     return F
@@ -137,11 +140,21 @@ outfile_p << p_sol
 sav_ts = float (5) 
 
 # XXX Time loop
-K = int(T/dt)
-for i in range(1,K):
+
+time=0.
+it=0
+tplot=0.
+while time <T and it < Nt_max:
+    u2 = project(u_sol[0]**2+u_sol[1]**2,V0)
+    if u2.vector().max()<1e-8:
+        dt=CFL*hmin
+    else:
+        dt = CFL*project(h/u2,V0).vector().min()
+    dT.assign(dt)
     # Compute the current time
-    t = i*dt
-    print("t =", t)
+    time = time+ dt
+    it+=1
+    print("t =", time, "dt = ", dt)
     
     F = define_form(up,up_pred, up_prev,vq)
     if linear_implicit:
@@ -178,11 +191,14 @@ for i in range(1,K):
     print(f"Residual {res}, time derivative u {u_diff_norm}, time derivative p {p_diff_norm}")
     # Plot
     (u_sol, p_sol) = up_sol.split()
-    if (i/sav_ts).is_integer():
+    tplot+= dt
+    if tplot > dtplot:
+        tplot = tplot - dtplot
         outfile_u << u_sol
         outfile_p << p_sol
     
-
+outfile_u << u_sol
+outfile_p << p_sol
 
 # solver.solve()
 # # Plot
