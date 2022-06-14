@@ -14,13 +14,13 @@ parameters["std_out_all_processes"] = False;
 
 
 # Create mesh
-Nx=100
-problem_name = "lid-driven_cavity"#"cylinder"#"lid-driven_cavity"
+Nx=50
+problem_name = "cylinder"#"lid-driven_cavity"#"lid-driven_cavity"
 physical_problem = Problem(problem_name, Nx)
 mesh = physical_problem.mesh
 
 # Set parameter values
-Re= Constant(5000. )
+Re= Constant(1000. )
 nu = Constant(1./Re)
 f = Constant((0., 0.))
 u_top = Constant(1.)
@@ -29,13 +29,21 @@ u_top = Constant(1.)
 degree_poly=2
 scalar_element = FiniteElement("CG", mesh.ufl_cell(), degree_poly)
 vector_element = VectorElement("CG", mesh.ufl_cell(), degree_poly)
+scalar_element_proj = FiniteElement("CG", mesh.ufl_cell(), degree_poly-1)
 vector_element_proj = VectorElement("CG", mesh.ufl_cell(), degree_poly-1)
 system_element = MixedElement( vector_element , scalar_element )
+system_element_proj = MixedElement( vector_element_proj , scalar_element_proj )
 dg0_element = FiniteElement("DG", mesh.ufl_cell(),0)
 V0 = FunctionSpace(mesh, dg0_element)
 W = FunctionSpace(mesh,system_element)
+W_proj = FunctionSpace(mesh,system_element_proj)
 V = FunctionSpace(mesh,vector_element)
 V_proj = FunctionSpace(mesh,vector_element_proj)
+
+
+
+
+bcs = physical_problem.define_bc(W, u_top)
 
 
 # Define trial and test functions
@@ -43,28 +51,16 @@ V_proj = FunctionSpace(mesh,vector_element_proj)
 up = Function(W)
 (u, p) = split(up)
 
+uptrial = TrialFunction(W)
+(utrial, vtrial) = split(uptrial)
+
+
 vq = TestFunction(W)
 (v, q)  = split(vq)
 
 
-# Define boundary conditions
-noslip  = DirichletBC(W.sub(0), (0, 0),
-                      "on_boundary && \
-                       (x[0] < DOLFIN_EPS | x[1] < DOLFIN_EPS | \
-                        x[0] > 1.0 - DOLFIN_EPS)")
-inflow  = DirichletBC(W.sub(0), (u_top, 0), "x[1] > 1.0 - DOLFIN_EPS")
-#outflow = DirichletBC(Q, 0, "x[0] > 1.0 - DOLFIN_EPS")
-
-class CenterDomain(SubDomain):
-    def inside(self, x, on_boundary):
-        return near(x[0], 0.5, DOLFIN_EPS) and near(x[1], 0.5, DOLFIN_EPS)
-center_domain = CenterDomain()
-
-g2 = Constant(0.)
-bc_one_point = DirichletBC(W.sub(1), g2, center_domain, method='pointwise')
-
-
-bcs = [noslip, inflow, bc_one_point]
+scalar_prod_form = inner(uptrial,vq)*dx
+scalar_prod_matrix = assemble(scalar_prod_form)
 
 
 # Define the forms
@@ -72,7 +68,7 @@ h = function.specialfunctions.CellDiameter(mesh)
 hmin = mesh.hmin()
 
 def sigma_star(v):
-    return v-project(project(v,V_proj),V)
+    return v#-project(project(v,V_proj),V)
 
 c1 = Constant(1.)
 c2 = Constant(1.)
