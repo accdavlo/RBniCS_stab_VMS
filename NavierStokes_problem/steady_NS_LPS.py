@@ -67,6 +67,15 @@ scalar_prod_matrix = assemble(scalar_prod_form)
 h = function.specialfunctions.CellDiameter(mesh)
 hmin = mesh.hmin()
 
+def dual_projection(z):
+    z1=Function(W)
+    z3=Function(W)
+    scalar_prod_matrix.transpmult(z.vector(), z1.vector())  # z1 = A'*z
+    z2=interpolate(interpolate(z1, W_proj),W)
+    solve(scalar_prod_matrix, z3.vector(), z2.vector())  # solve A*z3 = z2
+    return z3
+    
+
 def sigma_star(v):
     return v#-project(project(v,V_proj),V)
 

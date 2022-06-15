@@ -14,15 +14,15 @@ linear_implicit = True
 with_plot = True
 
 # Create mesh
-Nx=32
+Nx=64
 problem_name = "cylinder"#"lid-driven_cavity"#"lid-driven_cavity"
-problem = Problem(problem_name, Nx)
-mesh = problem.mesh
+physical_problem = Problem(problem_name, Nx)
+mesh = physical_problem.mesh
 
 # Set parameter values
 nu_value = 0.001
 u_top_value = 1.
-reynolds_value = problem.get_reynolds(u_top_value, nu_value)
+reynolds_value = physical_problem.get_reynolds(u_top_value, nu_value)
 print("Reynolds number = ",reynolds_value)
 nu = Constant(nu_value)
 Re= Constant(reynolds_value )
@@ -61,9 +61,6 @@ up_prev = Function(W)
 (u_prev, p_prev) = split(up_prev)
 
 
-up_pred = Function(W)
-(u_pred, p_pred) = split(up_pred)
-
 up_diff = Function(W)
 
 vq = TestFunction(W)
@@ -72,16 +69,17 @@ vq = TestFunction(W)
 up_sol = Function(W)
 (u_sol, p_sol) = split(up_sol)
 
-bcs = problem.define_bc(W, u_top)
+bcs = physical_problem.define_bc(W, u_top)
 
 
 # Define the forms
 h = function.specialfunctions.CellDiameter(mesh)
 hmin = mesh.hmin()
 
+nu_local = nu
+
 def sigma_star(v):
     return v
-
 
 
 c1 = Constant(1.)
@@ -89,28 +87,27 @@ c2 = Constant(1.)
 nu_local = nu
 
 
-
-def define_form(up,up_pred, up_prev,vq):
+def define_form(up, up_prev,vq):
     (u,p)           = split(up)
     (u_prev,p_prev) = split(up_prev)
-    (u_pred,p_pred) = split(up_pred)
     (v,q)           = split(vq)
-    
+
     tau_den = c1*(nu)/(h/degree_poly)**2+c2*project(sqrt(u_prev[0]**2+u_prev[1]**2),V0)/(h/degree_poly)
     tau_v   = project(1./(1./dT+tau_den),V0)
     tau_p   = tau_v
-    
     tau_d = project((h/degree_poly)**2/c1*tau_den,V0)
+
     
-    b_form_lin = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)  - inner(dot(u_prev,nabla_grad(v)),u))\
-                    + 0.5*(inner(dot(u_pred,nabla_grad(u))     ,v)  - inner(dot(u_pred,nabla_grad(v)),u) ))*dx
-    s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))*dx\
-                    + tau_v*inner(sigma_star(dot(u_pred,nabla_grad(u))),     sigma_star(dot(u_pred,nabla_grad(v))))*dx)  
+    b_form_lin = 0.5*(inner(dot(u_prev,nabla_grad(u)),v)  - inner(dot(u_prev,nabla_grad(v)),u)) *dx
+    b_form_nl =  0.5*(inner(dot(u,nabla_grad(u)),v)  - inner(dot(u,nabla_grad(v)),u)) *dx
+    # b_form_lin = inner(dot(u_prev,nabla_grad(u)),v)*dx
+    # b_form_nl =  inner(dot(u,nabla_grad(u)),v) *dx  
+
+    s_conv_lin = 0.5*tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))*dx  
     
-    b_form_nl = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)  - inner(dot(u_prev,nabla_grad(v)),u_prev)) \
-                   + 0.5*(inner(dot(u,nabla_grad(u)),          v)  - inner(dot(u,     nabla_grad(v)),u)) )*dx
-    s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))\
-                   + tau_v*inner(sigma_star(dot(u,     nabla_grad(u))),     sigma_star(dot(u,     nabla_grad(v))))  ) *dx
+    s_conv_nl = 0.5*tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))*dx
+                   
+  
     
     if linear_implicit:
         b_form = b_form_lin
@@ -118,30 +115,31 @@ def define_form(up,up_pred, up_prev,vq):
     else:
         b_form = b_form_nl
         s_conv = s_conv_nl
+
+    a_form = nu*inner(sym(grad(u)),sym(grad(v)))*dx
+    #a_form = nu*inner(grad(u),grad(v))*dx
+       
+    s_div  = (tau_d*inner(sigma_star(div(u)),sigma_star(div(v)))) *dx
+    s_pres = (tau_p*inner(sigma_star(grad(p)),sigma_star(grad(q)))) *dx
+
     
-    a_form = 2.0*nu*inner(sym(grad(0.5*(u+u_prev))),sym(grad(v)))*dx
-    
-    
-    s_div  = 0.5*(tau_d*inner(sigma_star(div(u+u_prev)),sigma_star(div(v)))) *dx
-    s_pres = 0.5*(tau_p*inner(sigma_star(grad(p+p_prev)),sigma_star(grad(q)))) *dx
-    
-    F = inner((u-u_prev)/dT,v)*dx + b_form + a_form - inner(p,div(v))*dx+ s_div\
-        +s_conv + inner(div(u),q)*dx + s_pres
+    F = inner((u-u_prev)/dT,v)*dx + b_form + a_form - inner(p,div(v))*dx\
+        + inner(div(u),q)*dx + s_pres +s_conv + s_div
 
     return F
 
 
 
 # Export the initial solution (zero)
-outfile_u = File(problem.name+"_unsteady_new/u.pvd")
-outfile_p = File(problem.name+"_unsteady_new/p.pvd")
-outfile_ld = File(problem.name+"_unsteady_new/ld.pvd")
+outfile_u = File(physical_problem.name+"_unsteady_new/u.pvd")
+outfile_p = File(physical_problem.name+"_unsteady_new/p.pvd")
+outfile_ld = File(physical_problem.name+"_unsteady_new/ld.pvd")
 
 (u_sol,p_sol) = up_sol.split()
 outfile_u << u_sol
 outfile_p << p_sol
 
-sav_ts = float (5) 
+sav_ts = float(5) 
 
 # XXX Time loop
 
@@ -154,41 +152,36 @@ while time <T and it < Nt_max:
         dt=CFL*hmin
     else:
         dt = CFL*project(h/u2,V0).vector().min()
-    dT.assign(dt)
+    dT.assign(Constant(dt))
     # Compute the current time
     time = time+ dt
     it+=1
     print("t =", time, "dt = ", dt)
     
-    F = define_form(up,up_pred, up_prev,vq)
+    F = define_form(up, up_prev,vq)
     if linear_implicit:
         ll = lhs(F)
         rr = rhs(F)
     else:
-        J = derivative(F, up, up-up_prev)
+        J = derivative(F, up)
         problem = NonlinearVariationalProblem(F, up, bcs, J)
         solver  = NonlinearVariationalSolver(problem)
     # Solve the nonlinear problem
     if linear_implicit:
-        for irk in range(2):
-            assign(up_pred, up_sol)
-            LL = assemble(ll)
-            RR = assemble(rr)
-            [bc.apply(LL,RR) for bc in bcs]
-            solve(LL,up_sol.vector(),RR)
+        LL = assemble(ll)
+        RR = assemble(rr)
+        [bc.apply(LL,RR) for bc in bcs]
+        solve(LL,up_sol.vector(),RR)
     else:
-        for irk in range(2):
-            assign(up_pred,up_sol)
-            solver.solve()
-            up_sol.assign(up)
+        solver.solve()
+        up_sol.assign(up)
     # Store the solution in up_prev
     up_diff.assign(up_sol - up_prev)
     (u_diff, p_diff) = up_diff.split()
     u_diff_norm = np.sqrt(assemble(inner(u_diff,u_diff)*dx))/dt
     p_diff_norm = np.sqrt(assemble(inner(p_diff,p_diff)*dx))/dt
-    F_lim =define_form(up_sol,up_pred, up_prev,vq)
+    F_lim =define_form(up_sol,up_prev,vq)
     res = norm(assemble(F_lim))
-
 
     assign(up_prev, up_sol)
 
