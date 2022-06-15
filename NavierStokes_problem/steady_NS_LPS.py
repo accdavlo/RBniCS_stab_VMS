@@ -15,12 +15,12 @@ parameters["std_out_all_processes"] = False;
 
 # Create mesh
 Nx=50
-problem_name = "cylinder"#"lid-driven_cavity"#"lid-driven_cavity"
+problem_name = "lid-driven_cavity"#"cylinder"#"lid-driven_cavity"
 physical_problem = Problem(problem_name, Nx)
 mesh = physical_problem.mesh
 
 # Set parameter values
-Re= Constant(1000. )
+Re= Constant(2000. )
 nu = Constant(1./Re)
 f = Constant((0., 0.))
 u_top = Constant(1.)
@@ -66,6 +66,7 @@ scalar_prod_matrix = assemble(scalar_prod_form)
 # Define the forms
 h = function.specialfunctions.CellDiameter(mesh)
 hmin = mesh.hmin()
+n = FacetNormal(mesh)
 
 def dual_projection(z):
     z1=Function(W)
@@ -83,7 +84,7 @@ c1 = Constant(1.)
 c2 = Constant(1.)
 nu_local = nu
 
-b_form = 0.5*(inner(dot(u,nabla_grad(u)),v)  + inner(dot(u,nabla_grad(v)),u) )*dx
+b_form = 0.5*(inner(dot(u,nabla_grad(u)),v)  - inner(dot(u,nabla_grad(v)),u) )*dx +0.5*dot(dot(v,outer(u,u)),n)*ds
 a_form = 2*nu*inner(sym(grad(u)),sym(grad(v)))*dx
 
 tau_den = c1*(nu+nu_local)/(h/degree_poly)**2+c2*project(sqrt(u[0]**2+u[1]**2),V0)/(h/degree_poly)
@@ -124,7 +125,7 @@ snes_solver_parameters = {"nonlinear_solver":"snes",
 
 problem = NonlinearVariationalProblem(F, up, bcs, J)
 solver  = NonlinearVariationalSolver(problem)
-#solver.parameters.update(snes_solver_parameters)
+solver.parameters.update(snes_solver_parameters)
 
 # Export the initial solution (zero)
 outfile_u = File(physical_problem.name+"_steady/u.pvd")

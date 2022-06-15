@@ -20,7 +20,7 @@ problem = Problem(problem_name, Nx)
 mesh = problem.mesh
 
 # Set parameter values
-nu_value = 0.001
+nu_value = 0.0001
 u_top_value = 1.
 reynolds_value = problem.get_reynolds(u_top_value, nu_value)
 print("Reynolds number = ",reynolds_value)
@@ -78,6 +78,7 @@ bcs = problem.define_bc(W, u_top)
 # Define the forms
 h = function.specialfunctions.CellDiameter(mesh)
 hmin = mesh.hmin()
+n = FacetNormal(mesh)
 
 def sigma_star(v):
     return v
@@ -102,13 +103,23 @@ def define_form(up,up_pred, up_prev,vq):
     
     tau_d = project((h/degree_poly)**2/c1*tau_den,V0)
     
-    b_form_lin = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)  - inner(dot(u_prev,nabla_grad(v)),u))\
-                    + 0.5*(inner(dot(u_pred,nabla_grad(u))     ,v)  - inner(dot(u_pred,nabla_grad(v)),u) ))*dx
+    b_form_lin = 0.5*(\
+                      0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)*dx  \
+                           - inner(dot(u_prev,nabla_grad(v)),u_prev)*dx\
+                           + dot(dot(v,outer(u_prev,u_prev)),n)*ds)\
+                    + 0.5*(inner(dot(u_pred,nabla_grad(u))     ,v)*dx  \
+                        - inner(dot(u_pred,nabla_grad(v)),u) *dx \
+                        + dot(dot(v,outer(u_pred,u)),n)*ds)
+                    )
     s_conv_lin = 0.5*(tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))*dx\
                     + tau_v*inner(sigma_star(dot(u_pred,nabla_grad(u))),     sigma_star(dot(u_pred,nabla_grad(v))))*dx)  
     
-    b_form_nl = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)  - inner(dot(u_prev,nabla_grad(v)),u_prev)) \
-                   + 0.5*(inner(dot(u,nabla_grad(u)),          v)  - inner(dot(u,     nabla_grad(v)),u)) )*dx
+    b_form_nl = 0.5*(0.5*(inner(dot(u_prev,nabla_grad(u_prev)),v)*dx  \
+                        - inner(dot(u_prev,nabla_grad(v)),u_prev)*dx  \
+                        + dot(dot(v,outer(u_prev,u_prev)),n)*ds )
+                   + 0.5*(inner(dot(u,nabla_grad(u)),          v)*dx  \
+                        - inner(dot(u,     nabla_grad(v)),u)*dx       \
+                        + dot(dot(v,outer(u,u)),n)*ds ) )
     s_conv_nl = 0.5*(tau_v*inner(sigma_star(dot(u_prev,nabla_grad(u_prev))),sigma_star(dot(u_prev,nabla_grad(v))))\
                    + tau_v*inner(sigma_star(dot(u,     nabla_grad(u))),     sigma_star(dot(u,     nabla_grad(v))))  ) *dx
     
@@ -123,9 +134,9 @@ def define_form(up,up_pred, up_prev,vq):
     
     
     s_div  = 0.5*(tau_d*inner(sigma_star(div(u+u_prev)),sigma_star(div(v)))) *dx
-    s_pres = 0.5*(tau_p*inner(sigma_star(grad(p+p_prev)),sigma_star(grad(q)))) *dx
+    s_pres = (tau_p*inner(sigma_star(grad(p)),sigma_star(grad(q)))) *dx
     
-    F = inner((u-u_prev)/dT,v)*dx + b_form + a_form - inner(p,div(v))*dx+ s_div\
+    F = inner((u-u_prev)/dT,v)*dx + b_form + a_form - 0.5*inner(p+p_prev,div(v))*dx+ s_div\
         +s_conv + inner(div(u),q)*dx + s_pres
 
     return F
@@ -144,6 +155,7 @@ outfile_p << p_sol
 sav_ts = float (5) 
 
 # XXX Time loop
+assign(up_sol, up_prev)
 
 time=0.
 it=0
@@ -159,6 +171,8 @@ while time <T and it < Nt_max:
     time = time+ dt
     it+=1
     print("t =", time, "dt = ", dt)
+
+    assign(up_pred, up_prev)
     
     F = define_form(up,up_pred, up_prev,vq)
     if linear_implicit:
