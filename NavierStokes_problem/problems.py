@@ -21,7 +21,8 @@ class Problem:
         elif self.name == "cylinder":
             # Create mesh
             channel = Rectangle(Point(0, 0), Point(2.2, 0.41))
-            cylinder = Circle(Point(0.2, 0.2), 0.05)
+            self.cylinder_diam = 0.1
+            cylinder = Circle(Point(0.2, 0.2), self.cylinder_diam/2.)
             self.domain = channel - cylinder
 
             self.mesh = generate_mesh(self.domain,self.Nx)
@@ -70,3 +71,15 @@ class Problem:
 
             self.bcs = [bcu_inflow, bcu_walls, bcu_cylinder,bcp_outflow]
             return self.bcs
+
+    def get_reynolds(self,u,nu):
+        if self.name=="lid-driven_cavity":
+            return u/nu
+        elif self.name=="cylinder":
+            return u/nu * self.cylinder_diam
+
+    def get_viscosity(self,u,Re):
+        if self.name=="lid-driven_cavity":
+            return u/Re
+        elif self.name=="cylinder":
+            return u/Re * self.cylinder_diam
