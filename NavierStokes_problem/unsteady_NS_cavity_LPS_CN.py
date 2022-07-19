@@ -14,15 +14,15 @@ linear_implicit = True
 with_plot = True
 
 # Create mesh
-Nx=32
-problem_name = "cylinder"#"lid-driven_cavity"#"lid-driven_cavity"
+Nx=50
+problem_name = "cylinder"#"lid-driven_cavity"#"lid-driven_cavity"#"lid-driven_cavity"
 problem = Problem(problem_name, Nx)
 mesh = problem.mesh
 
 # Set parameter values
-nu_value = 0.0001
+nu_value = 0.001/2
 u_top_value = 1.
-reynolds_value = problem.get_reynolds(u_top_value, nu_value)
+reynolds_value = problem.get_reynolds(u_top_value, 2.*nu_value)
 print("Reynolds number = ",reynolds_value)
 nu = Constant(nu_value)
 Re= Constant(reynolds_value )
@@ -85,8 +85,8 @@ def sigma_star(v):
 
 
 
-c1 = Constant(1.)
-c2 = Constant(1.)
+c1 = Constant(0.2)
+c2 = Constant(0.2)
 nu_local = nu
 
 

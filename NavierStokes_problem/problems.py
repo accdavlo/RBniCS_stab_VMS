@@ -10,6 +10,7 @@ class Problem:
     def __init__(self, name, Nx=50):
         self.name = name
         self.Nx = Nx
+        self.space_dim = 2
         self.setup_mesh()
 
     def setup_mesh(self):
@@ -48,7 +49,7 @@ class Problem:
             bc_one_point = DirichletBC(W.sub(1), g2, center_domain, method='pointwise')
 
 
-            self.bcs = [noslip, inflow, bc_one_point]
+            self.bcs = [inflow, noslip, bc_one_point]
             return self.bcs
         elif self.name == "cylinder":
             if u_in is None:
