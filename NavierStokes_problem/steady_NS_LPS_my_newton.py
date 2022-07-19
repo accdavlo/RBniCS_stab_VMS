@@ -234,8 +234,8 @@ n = FacetNormal(mesh)
 
 # Constants
 # Stabilization coefficients: the smaller c1, c2, the larger the stabilization
-c1 = Constant(0.1)
-c2 = Constant(0.1)
+c1 = Constant(4.)
+c2 = Constant(2.)
 # Smagorinskij constant
 CS = Constant(0.1)
 nu_local = nu
@@ -261,18 +261,25 @@ def assemble_forms(up):
     tau_den = c1*(nu+nu_local)/(h/degree_poly)**2+c2*project(sqrt(u[0]**2+u[1]**2),V0)/(h/degree_poly)
     tau    = project(1./tau_den,V0)
     
-    # For Jacobian
+    ############## For Jacobian  #####################################
     b_form_lin = 0.5*(inner(dot(delta_u,nabla_grad(u)),v) + inner(dot(u,nabla_grad(delta_u)),v)  \
                 - inner(dot(delta_u,nabla_grad(v)),u)- inner(dot(u,nabla_grad(v)),delta_u) )*dx \
                 +0.5*dot(dot(v,outer(u,delta_u)),n)*ds +0.5*dot(dot(v,outer(delta_u,u)),n)*ds
     a_form_lin = 2*nu*inner(sym(grad(delta_u)),sym(grad(v)))*dx
-    s_conv_lin = (tau*inner(dot(u,nabla_grad(delta_u)),dot(u,nabla_grad(v)))) *dx
-                 # (tau*inner(dot(delta_u,nabla_grad(u)),dot(u,nabla_grad(v)))) *dx+\
-                 # (tau*inner(dot(u,nabla_grad(delta_u)),dot(u,nabla_grad(v)))) *dx+\
-                 # (tau*inner(dot(u,nabla_grad(u)),dot(delta_u,nabla_grad(v)))) *dx
+    
+    # the convection stabilization term in the jacobian should give 3 terms. We try to
+    # comment out the  (u grad (Delta_u), u grad(v)) to see if it can be implemented 
+    # with the filter in the matrix form 
+    
+    # s_conv_lin = (tau*inner(dot(u,nabla_grad(delta_u)),dot(u,nabla_grad(v)))) *dx
+    s_conv_lin = (tau*inner(dot(delta_u,nabla_grad(u)),dot(u,nabla_grad(v)))) *dx+\
+                 (tau*inner(dot(u,nabla_grad(u)),dot(delta_u,nabla_grad(v)))) *dx#+\
+                 # (tau*inner(dot(u,nabla_grad(delta_u)),dot(u,nabla_grad(v)))) *dx
+
+    # I'm not using this term, it is actually in the filter matrix form below
     s_pres_lin = (tau*inner(grad(delta_p),grad(q))) *dx
 
-    # For residual
+    ############################ For residual  #########################
     b_form = 0.5*(inner(dot(u,nabla_grad(u)),v)  - inner(dot(u,nabla_grad(v)),u) )*dx +0.5*dot(dot(v,outer(u,u)),n)*ds
     a_form = 2*nu*inner(sym(grad(u)),sym(grad(v)))*dx
     s_conv = (tau*inner(dot(u,nabla_grad(u)),dot(u,nabla_grad(v)))) *dx
@@ -292,12 +299,24 @@ def assemble_forms(up):
         )
     sma_matrix = scipy2PETSc(sum(sma_matrix))
 
-    # # Stabilizations
+    # # Stabilizations (with filters)
 
-    # # Velocity stabilization term
-    # # tau*(sigma^*( u grad(u)), sigma^*(u grad v) )*dx )
-    base_matrix_conv_stab = PETSc2scipy(assemble(tau* inner(udg1,vdg1)*dx))
+    # # Convection stabilization term
+    # # tau*(sigma^*( u grad(delta_u), sigma^*(u grad v) )*dx )
+    # I consider u grad(delta_u) and (u grad v) in DG1 and I obtain them creating
+    # the discretized operator D of u grad (.), in this way. Let w in CG2, y in DG1:
+    # (u grad w, y) = (Dw,y) -> y^t M  w = y^t S D w, where M is the assembly of
+    # (u grad w, y) and S is the scalar product in DG1 -> D=S^-1 M
+    # D is Convection_cg2_to_dg1
+    # Then, consider x,y in DG1 I assemble the product tau(inner(x,y))*dx as 
+    # a matrix B called base_matrix_conv_stab. So, the stab term becomes 
+    # v^T D^T sigma^*^T B sigma^* D delta_u
     
+    base_matrix_conv_stab = PETSc2scipy(assemble(tau* inner(udg1,vdg1)*dx))
+
+    # There are 3 implementations of D, where I split the derivatives. 
+    # FD is the product   filter (sigma^* ) x D
+    # you can comment the filter
     Convection_cg2_to_dg1 = []
     for dim in range(space_dim):
         Convection_cg2_to_dg1.append(\
@@ -306,11 +325,11 @@ def assemble_forms(up):
 
     conv_stab_matrix=[]
     for dim in range(space_dim):
-        # FC = filterMatrixDG_scipy@ Convection_cg2_to_dg1[dim]
-        FC = Convection_cg2_to_dg1[dim]
+        FD = filterMatrixDG_scipy@ Convection_cg2_to_dg1[dim]
+        # FD = Convection_cg2_to_dg1[dim]
         conv_stab_matrix.append(\
             eliminate_zeros( \
-                FC.transpose() @ base_matrix_conv_stab @ FC \
+                FD.transpose() @ base_matrix_conv_stab @ FD \
             )\
         )
     conv_stab_matrix = sum(conv_stab_matrix)
@@ -325,11 +344,11 @@ def assemble_forms(up):
 
     # conv_stab_matrix=[]
     # for component in range(space_dim):
-    #     # FC = filterMatrixDG_scipy@ Convection_cg2_to_dg1[dim]
-    #     FC = Convection_cg2_to_dg1[component]
+    #     # FD = filterMatrixDG_scipy@ Convection_cg2_to_dg1[dim]
+    #     FD = Convection_cg2_to_dg1[component]
     #     conv_stab_matrix.append(\
     #         eliminate_zeros( \
-    #             FC.transpose() @ base_matrix_conv_stab @ FC \
+    #             FD.transpose() @ base_matrix_conv_stab @ FD \
     #         )\
     #     )
     # conv_stab_matrix = sum(conv_stab_matrix)
@@ -340,10 +359,10 @@ def assemble_forms(up):
     #         S_diag_DG1_inv@ PETSc2scipy( assemble( \
     #         inner(dot(u,nabla_grad(delta_u)), vdg1 )*dx ) ) )
 
-    # # FC = filterMatrixDG_scipy@ Convection_cg2_to_dg1[dim]
-    # FC = Convection_cg2_to_dg1
+    # # FD = filterMatrixDG_scipy@ Convection_cg2_to_dg1[dim]
+    # FD = Convection_cg2_to_dg1
     # conv_stab_matrix = eliminate_zeros( \
-    #         FC.transpose() @ base_matrix_conv_stab @ FC )
+    #         FD.transpose() @ base_matrix_conv_stab @ FD )
 
 
 
@@ -355,7 +374,9 @@ def assemble_forms(up):
 
 
 
-    # # Pression stabilization term 
+    # # Pression stabilization term
+    # Very similar to convection, but D is just the derivative (computed above)
+    # and the scalar product involves the pressures
     base_matrix_pres_stab = PETSc2scipy(assemble(tau* inner(pdg1,qdg1)*dx))
 
     pres_stab_matrix = []
@@ -375,7 +396,7 @@ def assemble_forms(up):
     lhs_form = b_form_lin + a_form_lin - inner(delta_p,div(v))*dx + inner(div(delta_u),q  )*dx  + s_conv_lin #   + s_pres_lin
     rhs_form = -(b_form + a_form - inner(p,div(v))*dx + inner(div(u),q)*dx   + s_conv )# ) + s_pres 
 
-    LL = as_backend_type(assemble(lhs_form))+ sma_matrix +pres_stab_matrix #+ conv_stab_matrix
+    LL = as_backend_type(assemble(lhs_form))+ sma_matrix +pres_stab_matrix + conv_stab_matrix
     RR = as_backend_type(assemble(rhs_form))
 
     rhs_pres_stab = RR.copy() 
@@ -387,6 +408,9 @@ def assemble_forms(up):
     RR = RR - rhs_pres_stab # -rhs_conv_stab
     
     return LL, RR
+
+
+# I do not use anymore external nonlinear solver
 
 # # Prepare nonlinear solver
 
