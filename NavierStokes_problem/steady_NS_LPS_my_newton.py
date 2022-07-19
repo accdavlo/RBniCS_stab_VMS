@@ -164,7 +164,7 @@ projection_MatrixCG = inter_CGpm1_2_CGp.matMult(proj_CGp_2_CGpm1)  #petsc4py.PET
 projection_MatrixCG = PETScMatrix(projection_MatrixCG)  #dolfin.cpp.la.PETScMatrix
 projection_MatrixCG_scipy = eliminate_zeros(PETSc2scipy(projection_MatrixCG))  #scipy.sparse
 filterMatrixCG_scipy = eliminate_zeros(sparse.eye(projection_MatrixCG_scipy.shape[0]) -projection_MatrixCG_scipy )
-polation_MatrixDG))  #scipy.sparse
+
 
 
 # Grad operators from CG2 to DG1
