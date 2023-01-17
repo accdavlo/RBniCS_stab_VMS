@@ -9,10 +9,80 @@ from matplotlib import pyplot
 import ufl
 from wurlitzer import pipes
 from numpy import random
+from fenicstools import interpolate_nonmatching_mesh, interpolate_nonmatching_mesh_any
+from utils_PETSc_scipy import PETSc2scipy, inverse_lumping_with_zeros
+
+
+import petsc4py
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
+from scipy.optimize import bisect
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
+
+def get_DG_inverse_matrix(VDG):
+    z_trial = TrialFunction(VDG)
+    z_test = TestFunction(VDG)
+    lhs = inner(z_trial,z_test)*ds
+    LHS = PETSc2scipy(assemble(lhs))
+    LHS_inv=inverse_lumping_with_zeros(LHS)
+    return LHS_inv
+
+def solve_boundary_problem(f, VDG, LHS_inv):
+    z_trial = TrialFunction(VDG)
+    z_test = TestFunction(VDG)
+    rhs = inner(f,z_test)*ds
+    RHS = assemble(rhs)
+    x = Function(VDG)
+    x.vector()[:]=LHS_inv@RHS
+    return x
+
+
+
+def solve_spalding_law(u):
+    u_norm = interpolate_nonmatching_mesh(project(sqrt(dot(u,u)),V0),V0_bound)
+    hb_bound = interpolate_nonmatching_mesh(solve_boundary_problem(hb,V0,DG_matrix_inv) ,V0_bound)
+
+    tau_B_bound = Function(V0_bound)
+
+    for cell in cells(bmesh):
+        cell_index = cell.index() 
+        mid_pt = cell.midpoint()
+        i = dofmapV0.dofs()[cell_index]
+        tau_B_bound.vector()[i] = bisect(spalding_func, 1e-14, 1e5, xtol=1e-12, \
+            args=(hb_bound.vector()[i], u_norm.vector()[i], \
+                Chi_Spalding(mid_pt), B_Spalding(mid_pt), C_b_I(mid_pt), nu(mid_pt) ) )
+    tau_B_ext = Function(V0)
+    tau_B_ext.vector()[:] = interp_V0_V0_bound@tau_B_bound.vector()
+
+    return tau_B_ext
+
+
+
+
+def spalding_func(tau, hb, unorm, Chi, B, C_b_I, nu):
+    y = hb/C_b_I
+    us = np.sqrt(tau*unorm)
+    yp = y*us/nu
+    up = unorm/us
+    Chiup = Chi*up
+    sp = yp-up-np.exp(-Chi*B)*(np.exp(Chiup)-1.-Chiup-Chiup**2/2.-Chiup**3/6.)
+    return sp
+    
+def spalding_der(tau, hb, unorm, Chi, B, C_b_I, nu):
+    y = hb/C_b_I
+    us = np.sqrt(tau*unorm)
+    yp = y*us/nu
+    up = unorm/us
+    Chiup = Chi*up
+    sp_der = y*np.sqrt(unorm/tau)/2./nu+np.sqrt(unorm/tau**3)/2.*(\
+        1+ np.exp(-Chi*B)*Chi*(\
+            np.exp(Chiup)-1.-Chiup-Chiup**2/2.\
+        )\
+    )
+    return sp_der
 
 
 def sigmaVisc(u,mu):
@@ -82,8 +152,8 @@ def stableNeumannBC(traction,u,v,n,g=None,ds=ds,gamma=Constant(1.0)):
              + gamma*ufl.Min(inner(u,n),Constant(0.0))
              *inner(u_minus_g,v))*ds
 
-def weakDirichletBC(u,p,v,q,g,nu,mesh,ds=ds,G=None,
-                    sym=True,C_pen=Constant(1e3),
+def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
+                    sym=True, spalding=True, C_pen=Constant(1e3),
                     overPenalize=False):
     """
     This returns the variational form corresponding to a weakly-enforced 
@@ -103,6 +173,10 @@ def weakDirichletBC(u,p,v,q,g,nu,mesh,ds=ds,G=None,
     For additional information on the theory, see
     https://doi.org/10.1016/j.compfluid.2005.07.012
     """
+    if spalding:
+        tau_pen  = solve_spalding_law(u_prev)
+    else:
+        tau_pen =  C_pen*nu*hb
     n = FacetNormal(mesh)
     sgn = 1.0
     if(not sym):
@@ -115,7 +189,7 @@ def weakDirichletBC(u,p,v,q,g,nu,mesh,ds=ds,G=None,
     adjointConsistency = -sgn*dot(sigma(v,-sgn*q,nu)*n,u-g)*ds
     # Only term we need to change
     hb = 2*sqrt(dot(n,G*n))
-    penalty = C_pen*nu*hb*dot((u-g),v)*ds
+    penalty = tau_pen*dot((u-g),v)*ds
     retval = consistencyTerm + adjointConsistency
     if(overPenalize or sym):
         retval += penalty
@@ -217,6 +291,8 @@ sides_ID = 4
 sides = Sides()
 sides.mark(boundaries, sides_ID)
 
+bmesh = BoundaryMesh(mesh, 'exterior')
+
 ds_bc = Measure('ds', domain=mesh, subdomain_data=boundaries, subdomain_id=1, metadata = {'quadrature_degree': 2})
 
 # Save to xml file
@@ -250,6 +326,28 @@ V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
 Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
 W_element = MixedElement(V_element, Q_element) # Taylor-Hood
 W = FunctionSpace(mesh, W_element, constrained_domain=PeriodicBoundary())
+
+
+dg0_element = FiniteElement("DG", mesh.ufl_cell(),0)
+V0 = FunctionSpace(mesh, dg0_element)
+dg0_bound_element = FiniteElement("DG", bmesh.ufl_cell(),0)
+V0_bound = FunctionSpace(bmesh, dg0_bound_element)
+
+DG_matrix_inv = get_DG_inverse_matrix(V0)
+dofmapV0 = V0.dofmap()
+
+dofmapV0_bound = V0_bound.dofmap()
+
+interp_V0_V0_bound=PETSc2scipy(PETScDMCollection.create_transfer_matrix(V0_bound,V0))
+
+tau_B= Function(V0)
+Chi_Spalding = Constant(0.4)
+B_Spalding = Constant(5.5)
+
+n = FacetNormal(mesh)
+G = meshMetric(mesh)
+hb = 2*sqrt(dot(n,G*n))
+    
 
 """### Test and trial functions (for the increment)"""
 vq                 = TestFunction(W) # Test function in the mixed space
@@ -289,6 +387,7 @@ rm = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,))
 rc = div(u)
 C_I = Constant(36.0)
 C_t = Constant(4.0)
+C_b_I = Constant(4.0)
 denom2 = inner(u,G*u) + C_I*nu*nu*inner(G,G) + DOLFIN_EPS
 if(dt != None):
     denom2 += C_t/dt**2
@@ -307,7 +406,7 @@ F = (inner(DuDt,v) + inner(sigma(u,p,nu),grad(v))
     + inner(v,dot(uPrime,nabla_grad(u)))
     - inner(grad(v),outer(uPrime,uPrime))- inner(f,v))*dx
 
-F += weakDirichletBC(u,p,v,q,u_bc,nu,mesh,ds_bc)
+F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
 
 J = derivative(F, up, delta_up)
 

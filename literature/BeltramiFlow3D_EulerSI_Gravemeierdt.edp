@@ -1,0 +1,562 @@
+//LOAD LIBRARIES
+load "UMFPACK64"
+load "msh3"
+load "Element_P1dc1"
+load "iovtk"
+
+//DOMAIN
+real xmin=-1., xmax=1.;
+real ymin=-1., ymax=1.;
+real zmin=-1.,zmax=1.;
+
+//BUILD MESH
+int nn=16;
+mesh Th2=square(nn,nn,[xmin+(xmax-xmin)*x,ymin+(ymax-ymin)*y]);
+int[int] rdown=[0,5],rup=[0,6],rmid=[1,7,2,8,3,9,4,10];
+mesh3 Th=buildlayers(Th2,nn,zbound=[zmin,zmax],reffacelow=rdown,reffaceup=rup,reffacemid=rmid);
+
+//SET NUMERICAL SIMULATION
+real nu0=1.e-3;//nu=1., Re = 6.62 (Diffusion-dominated) - nu = 1.e-3, Re = 6620 (Convection-dominated)
+real a=pi/4;
+real d=pi/2;
+real CS=0.1;//VMS CS=0.1 - STAB CS=0.
+real cc1p=4.;
+int l=2;//Inteprolation order
+
+//POST-PROCESSING
+ofstream f("ErrVelLinfL2.txt");
+ofstream ff("ErrVelL2H1.txt");
+ofstream fff("ErrPresLinfL2.txt");
+
+//DEFINE FE SPACES
+func Pk3d=P23d;
+func Pk1dc3d=P1dc3d;
+func Pk13d=P13d;
+func Pk=P2; 
+fespace Vh3P2(Th,[Pk3d,Pk3d,Pk3d,Pk3d]);
+fespace Vh3P1dc(Th,[Pk1dc3d,Pk1dc3d,Pk1dc3d,Pk1dc3d]);
+fespace Vh3P1(Th,[Pk13d,Pk13d,Pk13d,Pk13d]);
+fespace VhP2(Th,Pk3d);
+fespace VhP1dc(Th,Pk1dc3d);
+fespace VhP1(Th,Pk13d);
+fespace VhP0(Th,P03d);
+fespace Vh2(Th2,Pk);
+
+//STABILIZATION COEFF.
+real cc1=cc1p*l^2;
+real cc2=sqrt(cc1);
+
+//INIZ.
+int initialIt=0;
+int nIter=16;
+real t=0.;
+real tfin=0.1;
+real dt=tfin/nIter;
+real dtt=1./dt;
+real theta=1.;//Euler SI theta=1. - CN SI theta=0.5 (theta scheme)
+
+//EXACT SOL.(+-d)
+func fu1ex=-a*(exp(a*x)*sin(a*y+d*z)+exp(a*z)*cos(a*x+d*y))*exp(-nu0*t*d^2);
+func fu2ex=-a*(exp(a*y)*sin(a*z+d*x)+exp(a*x)*cos(a*y+d*z))*exp(-nu0*t*d^2);
+func fu3ex=-a*(exp(a*z)*sin(a*x+d*y)+exp(a*y)*cos(a*z+d*x))*exp(-nu0*t*d^2);
+func fpex=-((a^2)/2)*(exp(2*a*x)+exp(2*a*y)+exp(2*a*z)+2*sin(a*x+d*y)*cos(a*z+d*x)*exp(a*(y+z))
+													  +2*sin(a*y+d*z)*cos(a*x+d*y)*exp(a*(z+x))
+													  +2*sin(a*z+d*x)*cos(a*y+d*z)*exp(a*(x+y)))*exp(-2*nu0*t*d^2);
+													  
+VhP2 u1ex=fu1ex;
+VhP2 u2ex=fu2ex;
+VhP2 u3ex=fu3ex;
+VhP2 pex=fpex;
+Vh2 u1x0=u1ex(0,x,y);
+Vh2 u2x0=u2ex(0,x,y);
+Vh2 u3x0=u3ex(0,x,y);
+Vh2 u1y0=u1ex(x,0,y);
+Vh2 u2y0=u2ex(x,0,y);
+Vh2 u3y0=u3ex(x,0,y);
+Vh2 u1z0=u1ex(x,y,0);
+Vh2 u2z0=u2ex(x,y,0);
+Vh2 u3z0=u3ex(x,y,0);
+savevtk("ICux0.vtk",Th2,[u2x0,u3x0,0],u1x0,dataname="u2u3 u1");
+savevtk("ICuy0.vtk",Th2,[u1y0,u3y0,0],u2y0,dataname="u1u3 u2");
+savevtk("ICuz0.vtk",Th2,[u1z0,u2z0,0],u3z0,dataname="u1u2 u3");
+savevtk("ICp.vtk",Th,pex,dataname="p");	
+
+//ICs
+Vh3P2 [u1,u2,u3,p]=[u1ex,u2ex,u3ex,pex];
+VhP2 u1tmp,u2tmp,u3tmp;
+{ 
+	u1tmp = u1;
+	u2tmp = u2;
+	u3tmp = u3;
+}
+VhP0 tKcod,tKTcod,tau,taut,taud,mk;//hk;
+real hk=(xmax-xmin)/nn;
+cout << "size of mesh = " << hk << endl;; 
+
+//DEFINE MACRO
+macro Grad(u) [dx(u),dy(u),dz(u)]//EOM grad operator
+macro div(u1,u2,u3) (dx(u1)+dy(u2)+dz(u3))//EOM div operator
+macro eps(u1,u2,u3,v1,v2,v3) (4.*(dx(u1)*dx(v1)+dy(u2)*dy(v2)+dz(u3)*dz(v3))
+			+2.*((dx(u2)+dy(u1))*(dx(v2)+dy(v1))+(dx(u3)+dz(u1))*(dx(v3)+dz(v1))+(dy(u3)+dz(u2))*(dy(v3)+dz(v2))))//EOM eps(u)
+macro nor(u1,u2,u3,v1,v2,v3) ((dx(u1)-dx(v1))^2+(dy(u2)-dy(v2))^2+(dz(u3)-dz(v3))^2+0.5*(dx(u2)-dx(v2)+dy(u1)-dy(v1))^2+0.5*(dx(u3)-dx(v3)+dz(u1)-dz(v1))^2+0.5*(dy(u3)-dy(v3)+dz(u2)-dz(v2))^2)//EOM normH1 
+
+//TIME-INDEPENDENT VF
+varf vNS([uu1,uu2,uu3,pp],[v1,v2,v3,q])=
+	int3d(Th)(dtt*(uu1*v1+uu2*v2+uu3*v3)+theta*(nu0/2.)*eps(uu1,uu2,uu3,v1,v2,v3)
+			-theta*div(v1,v2,v3)*pp+theta*div(uu1,uu2,uu3)*q)
+	;
+
+//BUILD TIME-INDEPENDENT MATRIX
+cout << "----------------------------------------" << endl;	
+cout << "Starting iteration number " << initialIt << endl;	
+cout << "----------------------------------------" << endl;	
+	
+cout << "Build A fix." << endl;
+
+matrix Af = vNS(Vh3P2,Vh3P2);
+
+real meanp=int3d(Th)( p );;
+cout << "Mean Pressure = " << meanp << endl;
+
+real diver=int3d(Th)(abs(div(u1,u2,u3)));
+cout << "Divergence = " << diver << endl;
+
+real Ekin=int3d(Th)(0.5*(u1^2+u2^2+u3^2));
+cout << "Kinetic Energy = " << Ekin << endl;
+
+real errUL2=(sqrt(int3d(Th)(((u1-u1ex)^2)+((u2-u2ex)^2)+((u3-u3ex)^2))));// /(sqrt(int3d(Th)(u1ex^2 + u2ex^2 + u3ex^2)));
+cout << "Err. Vel. L2 = " << errUL2 << endl;
+f << errUL2 << "\n";	
+real errUH1=(int3d(Th)(nor(u1,u2,u3,u1ex,u2ex,u3ex)));
+cout << "Err. Vel. H1 = " << errUH1 << endl;
+ff << errUH1 << "\n";
+VhP2 PL2=dt*(p-pex);	
+real errPL2=(sqrt(int3d(Th)(PL2^2)));
+cout << "Err. Pres. L2 = " << errPL2 << endl;
+fff << errPL2 << "\n";	
+
+cout << "----------------------------------------" << endl;	
+cout << "End of iteration number " << initialIt << endl;	
+cout << "----------------------------------------" << endl;	
+
+//EL. AVERAGE
+varf med(unused,v)=int3d(Th)(1.*v);
+real[int] medk=med(0,VhP0);
+mk[]=sqrt(medk);
+/*
+for(int i=0;i<VhP0.ndof;i++)
+{
+	hk[][i]=medk(i)^(1./3.);
+}
+cout << "size of mesh = " << hk[].max << endl;; 
+*/
+//INTERP. MATRIX
+matrix DX3,DY3,DZ3;
+{
+	matrix DXYZ3u1,DXYZ3u2,DXYZ3u3,DXYZ3p;
+	
+	int[int] c0 = [0,-1,-1,-1];
+	int[int] c1 = [-1,1,-1,-1];
+	int[int] c2 = [-1,-1,2,-1];
+	int[int] c3 = [-1,-1,-1,3];
+	
+	DXYZ3u1 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c0,op=1);
+	DXYZ3u2 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c1,op=1);
+	DXYZ3u3 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c2,op=1);
+	DXYZ3p  = interpolate(Vh3P1dc,Vh3P2,U2Vc=c3,op=1);
+	DX3     = DXYZ3u1 + DXYZ3u2 + DXYZ3u3 + DXYZ3p;
+	
+	DXYZ3u1 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c0,op=2);
+	DXYZ3u2 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c1,op=2);
+	DXYZ3u3 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c2,op=2);
+	DXYZ3p  = interpolate(Vh3P1dc,Vh3P2,U2Vc=c3,op=2);
+	DY3     = DXYZ3u1 + DXYZ3u2 + DXYZ3u3 + DXYZ3p;
+	
+	DXYZ3u1 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c0,op=3);
+	DXYZ3u2 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c1,op=3);
+	DXYZ3u3 = interpolate(Vh3P1dc,Vh3P2,U2Vc=c2,op=3);
+	DXYZ3p  = interpolate(Vh3P1dc,Vh3P2,U2Vc=c3,op=3);
+	DZ3     = DXYZ3u1 + DXYZ3u2 + DXYZ3u3 + DXYZ3p;
+}
+
+int[int] cs2=[0]; 
+matrix Dxu1 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=1);
+matrix Dyu1 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=2);
+matrix Dzu1 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=3);
+
+cs2=[1];
+matrix Dxu2 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=1);
+matrix Dyu2 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=2);
+matrix Dzu2 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=3);
+
+cs2=[2];
+matrix Dxu3 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=1);
+matrix Dyu3 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=2);
+matrix Dzu3 = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=3);
+
+cs2=[3];
+matrix Dxp = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=1);
+matrix Dyp = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=2);
+matrix Dzp = interpolate(VhP1dc,Vh3P2,U2Vc=cs2,op=3);
+
+matrix IPh;
+matrix IPhId;
+matrix I3P2;
+{	
+	matrix Id,Idh;
+	matrix Id3;	
+	{
+		VhP2 fAux2 = 1.;
+		VhP1dc fAux1dc=1.;
+		Id = fAux2[];
+		Idh = fAux1dc[];
+		Id3 = [[Id,0,0,0],[0,Id,0,0],[0,0,Id,0],[0,0,0,Id]];
+	}
+	matrix PIg = interpolate(VhP1,VhP1dc); 
+	matrix IPg = interpolate(VhP1dc,VhP1); 
+	matrix IPPIg = IPg*PIg;
+	IPh = Idh + (-1.)*IPPIg;
+	
+	matrix PI = interpolate(VhP1,VhP2); 
+	matrix IP = interpolate(VhP2,VhP1); 
+	matrix IPPI = IP*PI;
+	IPhId = Id + (-1.)*IPPI;
+		
+	matrix PI3 = interpolate(Vh3P1,Vh3P2); 
+	matrix IP3 = interpolate(Vh3P2,Vh3P1); 
+	matrix IPPI3 = IP3*PI3;
+	I3P2 = Id3 + (-1.)*IPPI3;
+}
+
+matrix DDx = IPh*Dxp;
+matrix DDy = IPh*Dyp;
+matrix DDz = IPh*Dzp;
+
+matrix DXun = interpolate(VhP1dc,VhP2,op=1);
+matrix DYun = interpolate(VhP1dc,VhP2,op=2);
+matrix DZun = interpolate(VhP1dc,VhP2,op=3);
+
+VhP2 udcAux;
+VhP1dc u1dcX,u1dcY,u1dcZ,u2dcX,u2dcY,u2dcZ,u3dcX,u3dcY,u3dcZ;
+
+udcAux[] = IPhId*u1tmp[];
+u1dcX[]  = DXun*udcAux[];		
+u1dcY[]  = DYun*udcAux[];
+u1dcZ[]  = DZun*udcAux[];
+	 
+udcAux[] = IPhId*u2tmp[];
+u2dcX[]  = DXun*udcAux[];
+u2dcY[]  = DYun*udcAux[];
+u2dcZ[]  = DZun*udcAux[];
+
+udcAux[] = IPhId*u3tmp[];
+u3dcX[]  = DXun*udcAux[];
+u3dcY[]  = DYun*udcAux[];
+u3dcZ[]  = DZun*udcAux[];
+
+//START LOOP IN TIME   
+for(int i=1;i<=nIter;++i)
+{
+    t+=dt;
+    cout << "----------------------------------------" << endl;	
+    cout << "Starting iteration number " << i << " Time = " << t << endl;	
+    cout << "----------------------------------------" << endl;
+
+//EXACT SOL.
+u1ex=fu1ex;
+u2ex=fu2ex;
+u3ex=fu3ex;
+pex=fpex;
+
+//STAB. COEFF. CODINA FORM
+varf tauK(unused,v)=int3d(Th)((u1^2+u2^2+u3^2)*v);
+varf tauKT(unused,v)=int3d(Th)(((u1dcX)^2+(u2dcY)^2+(u3dcZ)^2
+								+0.5*((u2dcX+u1dcY)^2+(u3dcX+u1dcZ)^2+(u3dcY+u2dcZ)^2))*v);
+real[int] tK=tauK(0,VhP0);
+real[int] tKT=tauKT(0,VhP0);
+tKcod[]=sqrt(tK);
+tKTcod[]=sqrt(tKT);
+tau=((cc1*(nu0+((CS*hk)^2)*(tKTcod/mk))/hk^2) + (cc2*(tKcod/mk)/hk))^(-1.);
+taut=(dtt + (cc1*(nu0+((CS*hk)^2)*(tKTcod/mk))/hk^2) + (cc2*(tKcod/mk)/hk))^(-1.);
+taud=(hk^2)/(cc1*tau);
+
+//MATRIX VMS-SMAGORINSKY
+Vh3P1dc [u1p,u2p,u3p,pprev];
+
+varf VMSSma([u1l,u2l,u3l,unused],[v1l,v2l,v3l,ql]) = 
+		int3d(Th)(theta*((CS*hk)^2)*sqrt((u1dcX)^2+(u2dcY)^2+(u3dcZ)^2
+					+0.5*((u2dcX+u1dcY)^2+(u3dcX+u1dcZ)^2+(u3dcY+u2dcZ)^2))*(u1l*v1l+u2l*v2l+u3l*v3l));
+varf VMSSmaN([unused1,unused2,unused3,unusedp],[v1l,v2l,v3l,ql]) = 
+		int3d(Th)((1.-theta)*((CS*hk)^2)*sqrt((u1dcX)^2+(u2dcY)^2+(u3dcZ)^2
+					+0.5*((u2dcX+u1dcY)^2+(u3dcX+u1dcZ)^2+(u3dcY+u2dcZ)^2))*(u1p*v1l+u2p*v2l+u3p*v3l));	
+
+cout << "Build A VMS-Smag." << endl;
+matrix M = VMSSma(Vh3P1dc,Vh3P1dc);
+					
+matrix Sma;
+matrix DXX;
+matrix DYY;
+matrix DZZ;
+real[int] bMX(Vh3P2.ndof);
+real[int] bMY(Vh3P2.ndof);
+real[int] bMZ(Vh3P2.ndof);
+	{
+		matrix Maux;
+		// (I3P2'*DX3')*M*DX3*I3P2
+
+		Maux = DX3*I3P2;
+		DXX  = (Maux')*M;
+		DXX  = DXX*Maux;
+		u1p[]= Maux*u1[];
+		real[int] bM = VMSSmaN(0,Vh3P1dc);
+		bMX = (Maux')*bM;
+		
+		Maux = DY3*I3P2;
+		DYY  = (Maux')*M;
+		DYY  = DYY*Maux;
+		u1p[]= Maux*u1[];
+		bM = VMSSmaN(0,Vh3P1dc);
+		bMY = (Maux')*bM;
+		
+		Maux = DZ3*I3P2;
+		DZZ  = (Maux')*M;
+		DZZ  = DZZ*Maux;
+		u1p[]= Maux*u1[];
+		bM = VMSSmaN(0,Vh3P1dc);
+		bMZ = (Maux')*bM;
+	}
+Sma = DXX + DYY + DZZ;
+
+//MATRIX CONV. STAB.
+VhP1dc fu1dc,fu2dc,fu3dc;
+
+varf termConv(uu1,v1)=int3d(Th)(theta*taut*uu1*v1);
+varf termConvN1(unused,v1)=int3d(Th)((1.-theta)*taut*fu1dc*v1);
+varf termConvN2(unused,v1)=int3d(Th)((1.-theta)*taut*fu2dc*v1);
+varf termConvN3(unused,v1)=int3d(Th)((1.-theta)*taut*fu3dc*v1);
+
+cout << "Build A STAB-Conv." << endl;
+matrix TermC=termConv(VhP1dc,VhP1dc);
+
+matrix ES;
+
+VhP1dc u1dc = u1;
+VhP1dc u2dc = u2;
+VhP1dc u3dc = u3;
+					
+matrix U1dc = u1dc[];
+matrix U2dc = u2dc[];						
+matrix U3dc = u3dc[];						
+	
+//FIRST COMP.
+matrix ESu1;
+real[int] bESu1(Vh3P2.ndof);
+{
+matrix DF1=U1dc*Dxu1;
+matrix DF2=U2dc*Dyu1;
+matrix DF3=U3dc*Dzu1;
+matrix DF=DF1+DF2+DF3;
+matrix E=IPh*DF;
+matrix EE=TermC*E;
+ESu1=(E')*EE;
+fu1dc[]=E*u1[];
+real[int] TermCN1=termConvN1(0,VhP1dc);
+bESu1=(E')*TermCN1;
+}
+
+//SECOND COMP.
+matrix ESu2;
+real[int] bESu2(Vh3P2.ndof);
+{
+matrix DF1=U1dc*Dxu2;
+matrix DF2=U2dc*Dyu2;
+matrix DF3=U3dc*Dzu2;
+matrix DF=DF1+DF2+DF3;
+matrix E=IPh*DF;
+matrix EE=TermC*E;
+ESu2=(E')*EE;
+fu2dc[]=E*u1[];
+real[int] TermCN2=termConvN2(0,VhP1dc);
+bESu2=(E')*TermCN2;
+}
+
+//THIRD COMP.
+matrix ESu3;
+real[int] bESu3(Vh3P2.ndof);
+{
+matrix DF1=U1dc*Dxu3;
+matrix DF2=U2dc*Dyu3;
+matrix DF3=U3dc*Dzu3;
+matrix DF=DF1+DF2+DF3;
+matrix E=IPh*DF;
+matrix EE=TermC*E;
+ESu3=(E')*EE;
+fu3dc[]=E*u1[];
+real[int] TermCN3=termConvN3(0,VhP1dc);
+bESu3=(E')*TermCN3;
+}
+
+ES=ESu1+ESu2+ESu3;
+
+//MATRIX GRAD-PRES. STAB.
+VhP1dc fp1dc,fp2dc,fp3dc;
+
+varf termPres(pp,q)=int3d(Th)(theta*taut*pp*q);
+varf termPresN1(unused,q)=int3d(Th)((1.-theta)*taut*fp1dc*q);
+varf termPresN2(unused,q)=int3d(Th)((1.-theta)*taut*fp2dc*q);
+varf termPresN3(unused,q)=int3d(Th)((1.-theta)*taut*fp3dc*q);
+
+cout << "Build A STAB-GradPres." << endl;
+matrix TermP=termPres(VhP1dc,VhP1dc);
+
+matrix DD;
+
+matrix DDxx;
+real[int] bDDp1(Vh3P2.ndof);
+{
+DDxx=TermP*DDx; DDxx=DDx'*DDxx;
+fp1dc[]=DDx*u1[];
+real[int] TermPN1=termPresN1(0,VhP1dc);
+bDDp1=DDx'*TermPN1; 
+}
+
+matrix DDyy;
+real[int] bDDp2(Vh3P2.ndof);
+{
+DDyy=TermP*DDy; DDyy=DDy'*DDyy; 
+fp2dc[]=DDy*u1[];
+real[int] TermPN2=termPresN2(0,VhP1dc); 
+bDDp2=DDy'*TermPN2; 
+}
+
+matrix DDzz;
+real[int] bDDp3(Vh3P2.ndof);
+{
+DDzz=TermP*DDz; DDzz=DDz'*DDzz; 
+fp3dc[]=DDz*u1[];
+real[int] TermPN3=termPresN3(0,VhP1dc); 
+bDDp3=DDz'*TermPN3; 
+}
+
+DD=DDxx+DDyy+DDzz;
+
+//MATRIX DIV. STAB.
+VhP1dc fdivdc;
+
+varf termDiv(uu1,v1)=int3d(Th)(theta*taud*uu1*v1);
+varf termDivN(unused,v1)=int3d(Th)((1.-theta)*taud*fdivdc*v1);
+
+cout << "Build A STAB-Div." << endl;
+matrix TermD=termDiv(VhP1dc,VhP1dc);
+
+matrix DT;
+real[int] bDTu(Vh3P2.ndof);
+{
+matrix DF=Dxu1+Dyu2+Dzu3;
+matrix E=IPh*DF;
+matrix EE=TermD*E;
+DT=(E')*EE;
+fdivdc[]=E*u1[];
+real[int] TermDN=termDivN(0,VhP1dc);
+bDTu=(E')*TermDN;
+}
+
+//BUILD TIME-DEPENDENT MATRIX
+varf vNSp([uu1,uu2,uu3,pp],[v1,v2,v3,q])=
+	int3d(Th)(theta*0.5*(([u1,u2,u3]'*Grad(uu1))*v1+([u1,u2,u3]'*Grad(uu2))*v2+([u1,u2,u3]'*Grad(uu3))*v3)
+			-theta*0.5*(([u1,u2,u3]'*Grad(v1))*uu1+([u1,u2,u3]'*Grad(v2))*uu2+([u1,u2,u3]'*Grad(v3))*uu3)
+			)	
+	+on(5,uu1=u1ex,uu2=u2ex,uu3=u3ex)+on(5,pp=pex)
+	+on(6,uu1=u1ex,uu2=u2ex,uu3=u3ex)
+	+on(7,uu1=u1ex,uu2=u2ex,uu3=u3ex)
+	+on(8,uu1=u1ex,uu2=u2ex,uu3=u3ex)
+	+on(9,uu1=u1ex,uu2=u2ex,uu3=u3ex)
+	+on(10,uu1=u1ex,uu2=u2ex,uu3=u3ex)
+		+int3d(Th)(dtt*(u1*v1+u2*v2+u3*v3)	
+			-(1.-theta)*0.5*(([u1,u2,u3]'*Grad(u1))*v1+([u1,u2,u3]'*Grad(u2))*v2+([u1,u2,u3]'*Grad(u3))*v3)
+			+(1.-theta)*0.5*(([u1,u2,u3]'*Grad(v1))*u1+([u1,u2,u3]'*Grad(v2))*u2+([u1,u2,u3]'*Grad(v3))*u3)
+			-(1.-theta)*(nu0/2.)*eps(u1,u2,u3,v1,v2,v3)
+			+(1.-theta)*div(v1,v2,v3)*p-(1.-theta)*div(u1,u2,u3)*q
+			)
+	;
+	
+	cout << "Build A var." << endl;
+	matrix Av = vNSp(Vh3P2,Vh3P2);
+	
+	cout << "Build A fin." << endl;
+	matrix A = Af + Sma + ES + DD + DT + Av;
+	
+	cout << "Fact. A fin." << endl;
+	set(A,solver=UMFPACK);//FACT.
+	real[int] bv = vNSp(0,Vh3P2);
+	real[int] b = bv + bMX;
+	b = b + bMY;
+	b = b + bMZ;
+	b = b + bESu1;
+	b = b + bESu2;
+	b = b + bESu3;
+	b = b + bDDp1;
+	b = b + bDDp2;
+	b = b + bDDp3; 
+	b = b + bDTu;	
+		
+	u1[]= A^-1 * b;
+	
+	//PLOT DATA	
+	meanp=int3d(Th)( p );
+	cout << "Mean Pressure = " << meanp << endl;
+	
+	diver=int3d(Th)(abs(div(u1,u2,u3)));
+	cout << "Divergence = " << abs(diver) << endl;
+
+	Ekin=int3d(Th)(0.5*(u1^2+u2^2+u3^2));
+	cout << "Kinetic Energy = " << Ekin << endl;
+	
+	//TEST CONV.
+	errUL2=(sqrt(int3d(Th)(((u1-u1ex)^2)+((u2-u2ex)^2)+((u3-u3ex)^2))));// /(sqrt(int3d(Th)(u1ex^2 + u2ex^2 + u3ex^2)));
+	cout << "Err. Vel. L2 = " << errUL2 << endl;
+	f << errUL2 << "\n";	
+	errUH1=(int3d(Th)(nor(u1,u2,u3,u1ex,u2ex,u3ex)));
+	/*
+	errUH1=(sqrt(int3d(Th)(((u1-u1ex)^2)+((u2-u2ex)^2)+((u3-u3ex)^2) 
+						+(Grad(u1)-Grad(u1ex))'*(Grad(u1)-Grad(u1ex))
+						+(Grad(u2)-Grad(u2ex))'*(Grad(u2)-Grad(u2ex))
+						+(Grad(u3)-Grad(u3ex))'*(Grad(u3)-Grad(u3ex)))))/(sqrt(int3d(Th)(((u1ex)^2)+((u2ex)^2)+((u3ex)^2) 
+						+(Grad(u1ex))'*(Grad(u1ex))
+						+(Grad(u2ex))'*(Grad(u2ex))
+						+(Grad(u3ex))'*(Grad(u3ex)))));
+	*/					
+	cout << "Err. Vel. H1 = " << errUH1 << endl;
+	ff << errUH1 << "\n";
+	PL2=PL2+dt*(p-pex);	
+	errPL2=(sqrt(int3d(Th)(PL2^2)));
+	//errPL2=(sqrt(int3d(Th)(((p-pex)^2))))/(sqrt(int3d(Th)(pex^2)));
+	cout << "Err. Pres. L2 = " << errPL2 << endl;
+	fff << errPL2 << "\n";	
+	
+	//ACTUALIZ.
+	u1tmp = u1;
+	u2tmp = u2;
+	u3tmp = u3;
+						
+	udcAux[] = IPhId*u1tmp[];
+	u1dcX[]  = DXun*udcAux[];		
+	u1dcY[]  = DYun*udcAux[];
+	u1dcZ[]  = DZun*udcAux[];
+	 
+	udcAux[] = IPhId*u2tmp[];
+	u2dcX[]  = DXun*udcAux[];
+	u2dcY[]  = DYun*udcAux[];
+	u2dcZ[]  = DZun*udcAux[];
+
+	udcAux[] = IPhId*u3tmp[];
+	u3dcX[]  = DXun*udcAux[];
+	u3dcY[]  = DYun*udcAux[];
+	u3dcZ[]  = DZun*udcAux[];
+	
+	cout << "----------------------------------------" << endl;	
+	cout << "End of iteration number " << i << " Time = " << t << endl;
+	cout << "----------------------------------------" << endl;	
+}
+
+//END LOOP IN TIME

@@ -31,4 +31,7 @@ If interested in jupyter notebooks, remember to add the kernel to the jupyter ke
 python -m ipykernel install --user --name=fenics-2018
 ```
 
-
+I have added some files of the library fenicstools in [github](https://github.com/mikaem/fenicstools), which need `cppimport` to be used, so do
+```
+pip install cppimport
+```
