@@ -23,6 +23,11 @@ args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
 
 def get_DG_inverse_matrix(VDG):
+    """
+    Building the matrix that returns the inverse of the mass matrix only on boundary cells 
+    Piecewise constant polynomials considered
+    Input: VDG (FunctionalSpace) of discontinuous piecewise constant polynomials
+    """
     z_trial = TrialFunction(VDG)
     z_test = TestFunction(VDG)
     lhs = inner(z_trial,z_test)*ds
@@ -31,7 +36,10 @@ def get_DG_inverse_matrix(VDG):
     return LHS_inv
 
 def solve_boundary_problem(f, VDG, LHS_inv):
-    z_trial = TrialFunction(VDG)
+    """
+    Extend function f which is evaluatable only at boundaries onto the whole domain
+    the result lives in VDG which must be piecewise constant polynomails space.
+    """
     z_test = TestFunction(VDG)
     rhs = inner(f,z_test)*ds
     RHS = assemble(rhs)
@@ -41,19 +49,30 @@ def solve_boundary_problem(f, VDG, LHS_inv):
 
 
 
-def solve_spalding_law(u):
+def solve_spalding_law(u,hb):
+    """Finding the solution to Spalding's Law at boundary cells
+    Interpolating all functions onto the piecewise discontinuous polynomials on the boundary mesh 
+    (the restriction to the boundary of the cell)
+    In each cell finds the solution to Spalding's law through bisection 
+    (gradient is very steep in a very small region, the function is monotone increasing)
+    """
+    # computing the norm of u and interpolating hb on boundaries
     u_norm = interpolate_nonmatching_mesh(project(sqrt(dot(u,u)),V0),V0_bound)
     hb_bound = interpolate_nonmatching_mesh(solve_boundary_problem(hb,V0,DG_matrix_inv) ,V0_bound)
 
+    # solution of Spalding's law
     tau_B_bound = Function(V0_bound)
 
+    # Loop over boundary cells
     for cell in cells(bmesh):
         cell_index = cell.index() 
         mid_pt = cell.midpoint()
         i = dofmapV0.dofs()[cell_index]
+        # solving Spalding's law through bisection in a cell
         tau_B_bound.vector()[i] = bisect(spalding_func, 1e-14, 1e5, xtol=1e-12, \
             args=(hb_bound.vector()[i], u_norm.vector()[i], \
                 Chi_Spalding(mid_pt), B_Spalding(mid_pt), C_b_I(mid_pt), nu(mid_pt) ) )
+    # Extending the solution vector to the whole mesh
     tau_B_ext = Function(V0)
     tau_B_ext.vector()[:] = interp_V0_V0_bound@tau_B_bound.vector()
 
@@ -63,15 +82,29 @@ def solve_spalding_law(u):
 
 
 def spalding_func(tau, hb, unorm, Chi, B, C_b_I, nu):
-    y = hb/C_b_I
-    us = np.sqrt(tau*unorm)
-    yp = y*us/nu
-    up = unorm/us
-    Chiup = Chi*up
-    sp = yp-up-np.exp(-Chi*B)*(np.exp(Chiup)-1.-Chiup-Chiup**2/2.-Chiup**3/6.)
+    """ Spalding's law
+    SL(tau) = y^+-u^+-e^{-\Chi B}(e^{\Chi u^+} -1 -\Chi u^+ -(\Chi u^+)^2/2-(\Chi u^+)^3/6)
+    Where it holds tau_B = (u^*)^2/||u||, y^+=yu^*/\nu , u^+=||u||/u^*, y = h_b/C_b^I
+    Hence, one can write SL(tau) as a function of tau, hb, ||u|| and constants
+    Details: https://www.doi.org/10.1016/j.cma.2007.06.026
+    Inputs:
+    tau unknown parameter
+    h_b = 2*sqrt(dot(n,G*n)) mesh dependent parameter
+    ||u|| function of the solution velocity u 
+    Chi, B, C_b^I, nu constants
+    """
+    y = hb/C_b_I 
+    us = np.sqrt(tau*unorm) # u^*
+    yp = y*us/nu            # y^+
+    up = unorm/us           # u^+
+    Chiup = Chi*up          # \Chi*u^+
+    sp = yp-up-np.exp(-Chi*B)*(np.exp(Chiup)-1.-Chiup-Chiup**2/2.-Chiup**3/6.) # Spalding's law
     return sp
     
 def spalding_der(tau, hb, unorm, Chi, B, C_b_I, nu):
+    """
+    Derivative of Spalding's law in tau
+    """
     y = hb/C_b_I
     us = np.sqrt(tau*unorm)
     yp = y*us/nu
@@ -173,10 +206,6 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
     For additional information on the theory, see
     https://doi.org/10.1016/j.compfluid.2005.07.012
     """
-    if spalding:
-        tau_pen  = solve_spalding_law(u_prev)
-    else:
-        tau_pen =  C_pen*nu*hb
     n = FacetNormal(mesh)
     sgn = 1.0
     if(not sym):
@@ -189,6 +218,13 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
     adjointConsistency = -sgn*dot(sigma(v,-sgn*q,nu)*n,u-g)*ds
     # Only term we need to change
     hb = 2*sqrt(dot(n,G*n))
+    
+    # Weak penalty coefficient or Spalding's law coefficient
+    if spalding:
+        tau_pen  = solve_spalding_law(u_prev,hb)
+    else:
+        tau_pen =  C_pen*nu*hb
+    
     penalty = tau_pen*dot((u-g),v)*ds
     retval = consistencyTerm + adjointConsistency
     if(overPenalize or sym):
@@ -242,7 +278,7 @@ ry = 5
 rz = 5
 delta_pressure = Constant(1.0)
 nu = Constant(1.47e-4)
-f = Constant((3.37e-3,0.,0.))
+f = Constant((3.37204e-3,0.,0.))
 q_degree = 3
 dx = dx(metadata={'quadrature_degree': q_degree})
  
@@ -318,7 +354,7 @@ p_in = Expression('0', degree=1)
 # nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
 
 dt = 0.002
-T = 200 * dt # should be 15 to generate the video
+T = 2000 * dt # should be 15 to generate the video
 
 """### Function spaces"""
 pbc = PeriodicBoundary()
@@ -375,22 +411,27 @@ u_bc.vector().set_local(np.ones(u_bc.vector().size()))
 assign(up_prev , [u_0,p_0])
 assign(up , [u_0,p_0])
 u_t = (u - u_prev)/dt
+
 # Preparation of Variational forms.
 #K = JacobianInverse(mesh)
 #G = K.T*K
-G = meshMetric(mesh)
+
 #gg = (K[0,0] + K[1,0] + K[2,0])**2 + (K[0,1] + K[1,1] + K[2,1])**2 + (K[0,2] + K[1,2] + K[2,2])**2
 #rm = (u-u_prev)/dt + grad(p) + grad(u)*u - nu*(u.dx(0).dx(0) + u.dx(1).dx(1) + u.dx(2).dx(2)) - f
+
 DuDt = materialTimeDerivative(u,u_t,f)
 i,j = ufl.indices(2)
 rm = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,))
 rc = div(u)
+
 C_I = Constant(36.0)
 C_t = Constant(4.0)
 C_b_I = Constant(4.0)
+
 denom2 = inner(u,G*u) + C_I*nu*nu*inner(G,G) + DOLFIN_EPS
 if(dt != None):
     denom2 += C_t/dt**2
+
 tm = 1/sqrt(denom2)
 #tm=(4*((dt)**(-2)) + 36*(nu**2)*inner(G,G) + inner(u,G*u))**(-0.5)
 tc=1.0/(tm*tr(G))#!/usr/bin/env python
@@ -406,7 +447,7 @@ F = (inner(DuDt,v) + inner(sigma(u,p,nu),grad(v))
     + inner(v,dot(uPrime,nabla_grad(u)))
     - inner(grad(v),outer(uPrime,uPrime))- inner(f,v))*dx
 
-F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
+F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
 
 J = derivative(F, up, delta_up)
 
