@@ -453,7 +453,7 @@ F = (inner(DuDt,v) + inner(sigma(u,p,nu),grad(v))
     + inner(v,dot(uPrime,nabla_grad(u)))
     - inner(grad(v),outer(uPrime,uPrime))- inner(f,v))*dx
 
-F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
+F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
 
 J = derivative(F, up, delta_up)
 
@@ -473,6 +473,7 @@ snes_solver_parameters = {"nonlinear_solver": "snes",
                                           "maximum_iterations": 20,
                                           "report": True,
                                           "error_on_nonconvergence": True}}
+
 problem = NonlinearVariationalProblem(F, up, bc, J)
 solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
@@ -494,7 +495,7 @@ for i in range(1, K):
     # Solve the nonlinear problem
     # with pipes() as (out, err):
     #solver.solve()
-    solve(F == 0, up, bcs=bc)
+    solve(0.01*F == 0, up, bcs=bc)
     # Store the solution in up_prev
     assign(up_prev, up)
     # Plot
