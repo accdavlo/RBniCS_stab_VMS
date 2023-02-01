@@ -223,7 +223,7 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
     if spalding:
         tau_pen  = solve_spalding_law(u_prev,hb)
     else:
-        tau_pen =  C_pen*nu*hb
+        tau_pen =  C_pen*nu/hb
     
     penalty = tau_pen*dot((u-g),v)*ds
     retval = consistencyTerm + adjointConsistency
@@ -276,14 +276,17 @@ delta_z = 2/3*pi
 rx = 5
 ry = 5
 rz = 5
-delta_pressure = Constant(1.0)
+Nx = int(rx*delta_x)
+Ny = int(ry*delta_y)
+Nz = int(rz*delta_z)
+delta_pressure = Constant(1.)
 nu = Constant(1.47e-4)
 f = Constant((3.37204e-3,0.,0.))
 q_degree = 3
 dx = dx(metadata={'quadrature_degree': q_degree})
  
 # Create mesh
-mesh = BoxMesh(Point(0,0,0),Point(delta_x,delta_y,delta_z),int(rx*delta_x),int(ry*delta_y),int(rz*delta_z))
+mesh = BoxMesh(Point(0,0,0),Point(delta_x,delta_y,delta_z),Nx,Ny,Nz)
 
 # Create subdomains
 subdomains = MeshFunction("size_t", mesh, 2)
@@ -354,7 +357,7 @@ p_in = Expression('0', degree=1)
 # nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
 
 dt = 0.002
-T = 2000 * dt # should be 15 to generate the video
+T = 200 * dt # should be 15 to generate the video
 
 """### Function spaces"""
 pbc = PeriodicBoundary()
@@ -362,6 +365,8 @@ V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
 Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
 W_element = MixedElement(V_element, Q_element) # Taylor-Hood
 W = FunctionSpace(mesh, W_element, constrained_domain=PeriodicBoundary())
+print(W.dim())
+
 
 
 dg0_element = FiniteElement("DG", mesh.ufl_cell(),0)
@@ -383,7 +388,7 @@ B_Spalding = Constant(5.5)
 n = FacetNormal(mesh)
 G = meshMetric(mesh)
 hb = 2*sqrt(dot(n,G*n))
-    
+
 
 """### Test and trial functions (for the increment)"""
 vq                 = TestFunction(W) # Test function in the mixed space
@@ -401,13 +406,14 @@ up_prev = Function(W)
 up_bc = Function(W)
 (u_bc, _) = split(up_bc)
 
-## Here some tests I was doing to convert fenics objects to numpy
+## BCs for weak boundaries and initial condition perturbation
 u_0 = interpolate(u_in, W.sub(0).collapse())
 u_bc = interpolate(u_in, W.sub(0).collapse())
+
 p_0 = interpolate(p_in, W.sub(1).collapse())
-u_0.vector().set_local(u_0.vector().get_local()+10*(0.5-random.random(u_0.vector().size())))
-#u_bc = u_0.copy()
-u_bc.vector().set_local(np.ones(u_bc.vector().size()))
+
+u_0.vector().set_local(u_0.vector().get_local()+1e-1*(0.5-random.random(u_0.vector().size())))
+
 assign(up_prev , [u_0,p_0])
 assign(up , [u_0,p_0])
 u_t = (u - u_prev)/dt
@@ -460,7 +466,7 @@ sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID
 inlet_bc       = DirichletBC(W.sub(1), Constant(1.),       boundaries, inlet_ID )
 outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
 
-bc = [inlet_bc, outlet_bc, sides_bc]
+bc = [inlet_bc, outlet_bc, sides_bc]#, walls_bc]
 
 snes_solver_parameters = {"nonlinear_solver": "snes",
                           "snes_solver": {"linear_solver": "mumps",
