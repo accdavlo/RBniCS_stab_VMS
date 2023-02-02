@@ -18,6 +18,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.optimize import bisect
 
+boundary= "weak" #"strong" # "spalding"
+
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
@@ -273,9 +275,9 @@ class PeriodicBoundary(SubDomain):
 delta_x = 2*pi
 delta_y = 2
 delta_z = 2/3*pi
-rx = 5
-ry = 5
-rz = 5
+rx = 4
+ry = 4
+rz = 15
 Nx = int(rx*delta_x)
 Ny = int(ry*delta_y)
 Nz = int(rz*delta_z)
@@ -453,7 +455,10 @@ F = (inner(DuDt,v) + inner(sigma(u,p,nu),grad(v))
     + inner(v,dot(uPrime,nabla_grad(u)))
     - inner(grad(v),outer(uPrime,uPrime))- inner(f,v))*dx
 
-F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
+if boundary=="weak":
+    F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
+elif boundary=="spalding":
+    F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
 
 J = derivative(F, up, delta_up)
 
@@ -478,8 +483,8 @@ problem = NonlinearVariationalProblem(F, up, bc, J)
 solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
-outfile_u = File("out_6/u.pvd")
-outfile_p = File("out_6/p.pvd")
+outfile_u = File("out_6_"+boundary+"/u.pvd")
+outfile_p = File("out_6_"+boundary+"/p.pvd")
 
 (u, p) = up.split()
 outfile_u << u
@@ -495,7 +500,7 @@ for i in range(1, K):
     # Solve the nonlinear problem
     # with pipes() as (out, err):
     #solver.solve()
-    solve(0.01*F == 0, up, bcs=bc)
+    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
     # Store the solution in up_prev
     assign(up_prev, up)
     # Plot
