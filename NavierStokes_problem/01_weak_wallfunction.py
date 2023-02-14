@@ -587,8 +587,13 @@ problem = NonlinearVariationalProblem(F, up, bc, J)
 solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
-outfile_u = File("out_Hughes_"+boundary+"/u.pvd")
-outfile_p = File("out_Hughes_"+boundary+"/p.pvd")
+if giovanni:
+    outfile_u = File("out_giovanni_"+boundary+"/u.pvd")
+    outfile_p = File("out_giovanni_"+boundary+"/p.pvd")
+else:
+    outfile_u = File("out_Hughes_"+boundary+"/u.pvd")
+    outfile_p = File("out_Hughes_"+boundary+"/p.pvd")
+
 
 (u, p) = up.split()
 outfile_u << u
