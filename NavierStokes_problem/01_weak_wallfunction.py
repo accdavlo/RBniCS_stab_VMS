@@ -18,7 +18,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.optimize import bisect
 
-boundary= "weak" #"strong" # "spalding"
+giovanni = False
+boundary = "spalding"#"weak" #"strong" #  
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -120,19 +121,19 @@ def spalding_der(tau, hb, unorm, Chi, B, C_b_I, nu):
     return sp_der
 
 
-def sigmaVisc(u,mu):
+def sigmaVisc(u,nu):
     """
     The viscous part of the Cauchy stress, in terms of velocity ``u`` and
-    dynamic viscosity ``mu``.
+    dynamic viscosity ``nu``.
     """
-    return 2.0*mu*sym(grad(u))
+    return 2.0*nu*sym(grad(u))
 
-def sigma(u,p,mu):
+def sigma(u,p,nu):
     """
     The fluid Cauchy stress, in terms of velocity ``u``, pressure ``p``, 
-    and dynamic viscosity ``mu``.
+    and dynamic viscosity ``nu``.
     """
-    return sigmaVisc(u,mu) - p*Identity(ufl.shape(u)[0])
+    return sigmaVisc(u,nu) - p*Identity(ufl.shape(u)[0])
 
 def materialTimeDerivative(u,u_t=None,f=None):
     """
@@ -196,7 +197,7 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
     given by ``ds``, defaulting to the full boundary of the domain given by
     ``mesh``.  It takes as parameters an unknown velocity, ``u``, 
     unknown pressure ``p``, corresponding test functions ``v`` and ``q``, 
-    mass density ``rho``, and viscosity ``mu``.  Optionally, the 
+    mass density ``rho``, and viscosity ``nu``.  Optionally, the 
     non-symmetric variant can be used by overriding ``sym``.  ``C_pen`` is
     a dimensionless scaling factor on the penalty term.  The penalty term
     is omitted if ``not sym``, unless ``overPenalize`` is 
@@ -234,16 +235,94 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
         print("Passing here")
     return retval
 
+def weakHughesBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
+                    symmetric=True, spalding=True, gamma=Constant(1.0),
+                    C_pen=Constant(1e3), overPenalize=False):
+    """
+    This returns the variational form corresponding to a weakly-enforced 
+    velocity Dirichlet BC, with data ``g``, on the boundary measure
+    given by ``ds``, defaulting to the full boundary of the domain given by
+    ``mesh``.  It takes as parameters an unknown velocity, ``u``, 
+    unknown pressure ``p``, corresponding test functions ``v`` and ``q``, 
+    mass density ``rho``, and viscosity ``nu``.  Optionally, the 
+    non-symmetric variant can be used by overriding ``symmetric``.  ``C_pen`` is
+    a dimensionless scaling factor on the penalty term.  The penalty term
+    is omitted if ``not sym``, unless ``overPenalize`` is 
+    optionally set to ``True``.  The argument ``G`` can optionally be given 
+    a non-``None`` value, to use an alternate mesh size tensor.  If left 
+    as ``None``, it will be set to the output of ``meshMetric(mesh)``.
+    NOTE: The sign convention here assumes that the return value is 
+    ADDED to the residual given by ``interiorResidual``.
+    For additional information on the theory, see
+    https://doi.org/10.1016/j.compfluid.2005.07.012
+    """
+    n = FacetNormal(mesh)
+    sgn = 1.0
+    if(not symmetric):
+        sgn = -1.0
+    if G == None:
+        G = meshMetric(mesh) # $\sim h^{-2}$
+
+    consistencyTerm = -sgn*inner(2*nu*sym(grad(u))*n,v)*ds
+    adjointConsistency = -sgn*inner(2*gamma*nu*sym(grad(v))*n,u-g)*ds
+
+    # Only term we need to change
+    hb = 2*sqrt(dot(n,G*n))
+    
+    # Weak penalty coefficient or Spalding's law coefficient
+    if spalding:
+        tau_pen  = solve_spalding_law(u_prev,hb)
+    else:
+        tau_pen =  C_pen*nu/hb
+    
+    penalty = tau_pen*dot((u-g),v)*ds
+    retval = consistencyTerm + adjointConsistency
+    if(overPenalize or symmetric):
+        retval += penalty
+        print("Passing here")
+    return retval
+
+
 def strongResidual(u,p,nu,u_t=None,f=None):
     """
     The momentum and continuity residuals, as a tuple, of the strong PDE,
     system, in terms of velocity ``u``, pressure ``p``, dynamic viscosity
-    ``mu``, mass density ``rho``, and, optionally, the partial time derivative
+    ``nu``, mass density ``rho``, and, optionally, the partial time derivative
     of velocity, ``u_t``, and a body force per unit mass, ``f``.  
     """
     DuDt = materialTimeDerivative(u,u_t,f)
     i,j = ufl.indices(2)
     r_M = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,))
+    r_C = div(u)
+    return r_M, r_C
+
+def stabilizationParameters(u,nu,G,C_I,C_t,Dt=None,scale=Constant(1.0)):
+    """
+    Compute SUPS and LSIC/grad-divx stabilization parameters (returned as a
+    tuple, in that order).  Input parameters are the velocity ``u``,  the mesh
+    velocity ``vhat``, the kinematic viscosity ``nu``, the mesh metric ``G``,
+    order-one constants ``C_I`` and ``C_t``, a time step ``Dt`` (which may be
+    omitted for steady problems), and a scaling factor that defaults to unity.  
+    """
+    # The additional epsilon is needed for zero-velocity robustness
+    # in the inviscid limit.
+    denom2 = inner(u,G*u) + C_I*nu*nu*inner(G,G) + DOLFIN_EPS
+    if(Dt != None):
+        denom2 += C_t/Dt**2
+    tau_M = scale/sqrt(denom2)
+    tau_C = 1.0/(tau_M*tr(G))
+    return tau_M, tau_C
+
+def strongResidual(u,p,nu,u_t,f):
+    """
+    The momentum and continuity residuals, as a tuple, of the strong PDE,
+    system, in terms of velocity ``u``, pressure ``p``, dynamic viscosity ``nu``,
+    the partial time derivative of velocity ``u_t``, and a body force per unit mass
+    ``f``.  
+    """
+    DuDt = materialTimeDerivative(u,u_t,f)
+    i,j = ufl.indices(2)
+    r_M = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,))  # if P1 last term zero
     r_C = div(u)
     return r_M, r_C
 
@@ -275,9 +354,9 @@ class PeriodicBoundary(SubDomain):
 delta_x = 2*pi
 delta_y = 2
 delta_z = 2/3*pi
-rx = 4
-ry = 4
-rz = 15
+rx = 5
+ry = 5
+rz = 5
 Nx = int(rx*delta_x)
 Ny = int(ry*delta_y)
 Nz = int(rz*delta_z)
@@ -352,7 +431,7 @@ boundaries.rename("boundaries", "boundaries")
 xdmf.write(boundaries)
 
 
-Re = 120.
+Re = 120. # not used!!
 u_bar = 1.
 u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0.", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
 p_in = Expression('0', degree=1)
@@ -429,7 +508,7 @@ u_t = (u - u_prev)/dt
 
 DuDt = materialTimeDerivative(u,u_t,f)
 i,j = ufl.indices(2)
-rm = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,))
+rm = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,)) # if u \in P1 last term is zero (second derivative)! 
 rc = div(u)
 
 C_I = Constant(36.0)
@@ -448,17 +527,39 @@ tcross = outer((tm*rm),(tm*rm))
 uPrime = -tm*rm
 pPrime = -tc*rc
 
-F = (inner(DuDt,v) + inner(sigma(u,p,nu),grad(v))
-    + inner(div(u),q)
-    - inner(dot(u,nabla_grad(v)) + grad(q), uPrime)
-    - inner(pPrime,div(v))
-    + inner(v,dot(uPrime,nabla_grad(u)))
-    - inner(grad(v),outer(uPrime,uPrime))- inner(f,v))*dx
+# Giovanni's version
+if giovanni:
+    F = (inner(DuDt,v) + inner(sigma(u,p,nu),grad(v))
+        + inner(div(u),q)
+        - inner(dot(u,nabla_grad(v)) + grad(q), uPrime)
+        - inner(pPrime,div(v))
+        + inner(v,dot(uPrime,nabla_grad(u)))
+        - inner(grad(v),outer(uPrime,uPrime)))*dx
 
-if boundary=="weak":
-    F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
-elif boundary=="spalding":
-    F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
+    if boundary=="weak":
+        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
+    elif boundary=="spalding":
+        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
+else:
+    #Hughes' version
+    r_M, r_C = strongResidual(u,p,nu,u_t,f)
+    tau_M, tau_C = stabilizationParameters(u,nu,G,C_I,C_t,Dt=None,scale=Constant(1.0))
+
+    stab =  (inner( dot(u,2*sym(grad(v)))+grad(q), tau_M * r_M )
+           + inner(div(v), tau_C * r_C ))*dx
+
+    F = (inner(u_t,v) - inner(outer(u,u), grad(v))- inner(f,v) # = inner(DuDt, v) 
+         + inner(div(u),q)  
+         - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
+        + stab
+
+    if boundary=="weak":
+        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=False)
+    elif boundary=="spalding":
+        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=True)
+
+
+
 
 J = derivative(F, up, delta_up)
 
@@ -471,7 +572,10 @@ sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID
 inlet_bc       = DirichletBC(W.sub(1), Constant(1.),       boundaries, inlet_ID )
 outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
 
-bc = [inlet_bc, outlet_bc, sides_bc]#, walls_bc]
+if boundaries == "strong":
+    bc = [inlet_bc, outlet_bc, sides_bc, walls_bc]
+else:
+    bc = [inlet_bc, outlet_bc, sides_bc]#, walls_bc]
 
 snes_solver_parameters = {"nonlinear_solver": "snes",
                           "snes_solver": {"linear_solver": "mumps",
@@ -483,8 +587,8 @@ problem = NonlinearVariationalProblem(F, up, bc, J)
 solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
-outfile_u = File("out_6_"+boundary+"/u.pvd")
-outfile_p = File("out_6_"+boundary+"/p.pvd")
+outfile_u = File("out_Hughes_"+boundary+"/u.pvd")
+outfile_p = File("out_Hughes_"+boundary+"/p.pvd")
 
 (u, p) = up.split()
 outfile_u << u
