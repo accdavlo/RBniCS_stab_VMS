@@ -19,7 +19,7 @@ from scipy.sparse.linalg import spsolve
 from scipy.optimize import bisect
 
 giovanni = False
-boundary = "spalding"#"weak" #"strong" #  
+boundary_tag = "strong"#"spalding"#"weak" #"strong" #  
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -360,9 +360,12 @@ rz = 5
 Nx = int(rx*delta_x)
 Ny = int(ry*delta_y)
 Nz = int(rz*delta_z)
-delta_pressure = Constant(1.)
-nu = Constant(1.47e-4)
-f = Constant((3.37204e-3,0.,0.))
+
+delta_pressure_val = 3.37204e-3 
+delta_pressure = Constant(delta_pressure_val)
+nu_val = 1.472e-4
+nu = Constant(nu_val)
+f = Constant((delta_pressure_val,0.,0.))
 q_degree = 3
 dx = dx(metadata={'quadrature_degree': q_degree})
  
@@ -431,13 +434,18 @@ boundaries.rename("boundaries", "boundaries")
 xdmf.write(boundaries)
 
 
-Re = 120. # not used!!
-u_bar = 1.
-u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0.", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
+Re = 395. # 120. # not used!!
+#u_bar = Re*nu_val/delta_z
+u_max = delta_pressure_val/4/nu_val*delta_z**2
+print(u_max)
+Re_posteriori = u_max/nu_val*delta_z
+print(Re_posteriori)
+#u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0.", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
+u_in = Expression(("u_max*4*x[2]*(delta_z-x[2])/delta_z/delta_z", "0.", "0."), t=0, delta_z = delta_z, u_max=u_max, nu=nu, delta_pressure=delta_pressure, degree=2) 
 p_in = Expression('0', degree=1)
 # nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
 
-dt = 0.002
+dt = delta_x/Nx/u_max
 T = 200 * dt # should be 15 to generate the video
 
 """### Function spaces"""
@@ -446,6 +454,9 @@ V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
 Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
 W_element = MixedElement(V_element, Q_element) # Taylor-Hood
 W = FunctionSpace(mesh, W_element, constrained_domain=PeriodicBoundary())
+Wu = FunctionSpace(mesh, V_element, constrained_domain=PeriodicBoundary())
+Wp = FunctionSpace(mesh, Q_element, constrained_domain=PeriodicBoundary())
+
 print(W.dim())
 
 
@@ -488,12 +499,20 @@ up_bc = Function(W)
 (u_bc, _) = split(up_bc)
 
 ## BCs for weak boundaries and initial condition perturbation
-u_0 = interpolate(u_in, W.sub(0).collapse())
+u_pert = Expression(('u_max*0.01*sin(25*x[2]*2*pi/delta_z)',\
+    '1e-3*u_max*sin(33*x[0]*2*pi/delta_x)',\
+    '1e-3*u_max*sin(41*x[0]*2*pi/delta_x)'), \
+    degree=4, u_max=u_max, delta_x=delta_x, delta_y=delta_y, delta_z=delta_z)
+
+#u_0 = interpolate(u_in, W.sub(0).collapse())
+u_0 = project(u_in+u_pert, W.sub(0).collapse())
+#u_0 = interpolate(u_in, W.sub(0).collapse())+project(u_pert, W.sub(0).collapse())
+
 u_bc = interpolate(u_in, W.sub(0).collapse())
 
 p_0 = interpolate(p_in, W.sub(1).collapse())
 
-u_0.vector().set_local(u_0.vector().get_local()+1e-1*(0.5-random.random(u_0.vector().size())))
+#u_0.vector().set_local(u_0.vector().get_local()+1e-1*(0.5-random.random(u_0.vector().size())))
 
 assign(up_prev , [u_0,p_0])
 assign(up , [u_0,p_0])
@@ -536,9 +555,9 @@ if giovanni:
         + inner(v,dot(uPrime,nabla_grad(u)))
         - inner(grad(v),outer(uPrime,uPrime)))*dx
 
-    if boundary=="weak":
+    if boundary_tag=="weak":
         F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
-    elif boundary=="spalding":
+    elif boundary_tag=="spalding":
         F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
 else:
     #Hughes' version
@@ -553,9 +572,9 @@ else:
          - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
         + stab
 
-    if boundary=="weak":
+    if boundary_tag=="weak":
         F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=False)
-    elif boundary=="spalding":
+    elif boundary_tag=="spalding":
         F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=True)
 
 
@@ -572,7 +591,7 @@ sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID
 inlet_bc       = DirichletBC(W.sub(1), Constant(1.),       boundaries, inlet_ID )
 outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
 
-if boundaries == "strong":
+if boundary_tag == "strong":
     bc = [inlet_bc, outlet_bc, sides_bc, walls_bc]
 else:
     bc = [inlet_bc, outlet_bc, sides_bc]#, walls_bc]
@@ -588,11 +607,11 @@ solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
 if giovanni:
-    outfile_u = File("out_giovanni_"+boundary+"/u.pvd")
-    outfile_p = File("out_giovanni_"+boundary+"/p.pvd")
+    outfile_u = File("out_giovanni_"+boundary_tag+"/u.pvd")
+    outfile_p = File("out_giovanni_"+boundary_tag+"/p.pvd")
 else:
-    outfile_u = File("out_Hughes_"+boundary+"/u.pvd")
-    outfile_p = File("out_Hughes_"+boundary+"/p.pvd")
+    outfile_u = File("out_Hughes_"+boundary_tag+"/u.pvd")
+    outfile_p = File("out_Hughes_"+boundary_tag+"/p.pvd")
 
 
 (u, p) = up.split()
@@ -609,7 +628,8 @@ for i in range(1, K):
     # Solve the nonlinear problem
     # with pipes() as (out, err):
     #solver.solve()
-    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
+    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8,
+                                                            "absolute_tolerance":1e-8} })
     # Store the solution in up_prev
     assign(up_prev, up)
     # Plot
