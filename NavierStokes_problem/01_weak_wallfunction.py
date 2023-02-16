@@ -326,31 +326,6 @@ def strongResidual(u,p,nu,u_t,f):
     r_C = div(u)
     return r_M, r_C
 
-class PeriodicBoundary(SubDomain):
-
-    def inside(self, x, on_boundary):
-        # return True if on left or bottom boundary AND NOT on one of the two slave edges
-        return bool((near(x[0], 0) or near(x[1], 0)) and 
-            (not ((near(x[0], delta_x) and near(x[1], 0)) or 
-                  (near(x[0], 0) and near(x[1], delta_y)))) and on_boundary)
-
-    def map(self, x, y):
-        if near(x[0], delta_x) and near(x[1], delta_y):
-            y[0] = x[0] - delta_x
-            y[1] = x[1] - delta_y 
-            y[2] = x[2] 
-        elif near(x[0], delta_x):
-            y[0] = x[0] - delta_x
-            y[1] = x[1]
-            y[2] = x[2]
-        elif near(x[1], delta_y):
-            y[0] = x[0]
-            y[1] = x[1] - delta_y
-            y[2] = x[2]
-        else:
-            y[0] = -1000
-            y[1] = -1000
-            y[2] = -1000
 delta_x = 2*pi
 delta_y = 2
 delta_z = 2/3*pi
@@ -360,6 +335,10 @@ rz = 5
 Nx = int(rx*delta_x)
 Ny = int(ry*delta_y)
 Nz = int(rz*delta_z)
+
+dx_mesh = delta_x/Nx
+dy_mesh = delta_y/Nx
+dz_mesh = delta_z/Nx
 
 delta_pressure_val = 3.37204e-3 
 delta_pressure = Constant(delta_pressure_val)
@@ -378,26 +357,65 @@ subdomains.set_all(0)
 
 # Create boundaries
 class Walls(SubDomain):
+    # z=0  +  z=Deltaz for u no-slip walls
     def inside(self, x, on_boundary):
         return on_boundary and \
             (abs(x[2]) < DOLFIN_EPS or abs(x[2] - delta_z) < DOLFIN_EPS)
         
 class Outlet(SubDomain):
+    # x=Delta x    for pressure (I don't use it)
     def inside(self, x, on_boundary):
         return on_boundary and abs(x[0] - delta_x) < DOLFIN_EPS
         
 class Inlet(SubDomain):
+    # x=0      for pressure (I don't use it)
     def inside(self, x, on_boundary):
         return on_boundary and abs(x[0]) < DOLFIN_EPS
 
 class Sides(SubDomain):
+    # y=0 and y=Delta y     I guess there shouldn't be anything here
     def inside(self, x, on_boundary):
         return on_boundary and \
             (abs(x[1]) < DOLFIN_EPS or abs(x[1] - delta_y) < DOLFIN_EPS)
 
+class OnePoint(SubDomain):
+    # x=y=z=0      to set pressure in one point
+    def inside(self, x, on_boundary):
+        return on_boundary and \
+           (abs(x[0]-2.*dx_mesh) < 3.*dx_mesh and abs(x[1]-2.*dy_mesh) < 3.*dy_mesh and abs(x[2]) < dz_mesh)
+            # (abs(x[0]) < DOLFIN_EPS and abs(x[1]) < DOLFIN_EPS and abs(x[2]) < DOLFIN_EPS)
+
 class AllBoundary(SubDomain):
     def inside(self, x, on_boundary):
         return on_boundary
+
+class PeriodicBoundary(SubDomain):
+
+    def inside(self, x, on_boundary):
+        # return True if on left or bottom boundary AND NOT on one of the two slave edges
+        return bool((near(x[0], 0) or near(x[1], 0)) and 
+            (not ( near(x[0], delta_x) or 
+                  near(x[1], delta_y) ) ) and on_boundary)
+
+    def map(self, x, y):
+        if near(x[0], delta_x) and near(x[1], delta_y):
+            y[0] = x[0] - delta_x
+            y[1] = x[1] - delta_y 
+            y[2] = x[2] 
+        elif near(x[0], delta_x):
+            y[0] = x[0] - delta_x
+            y[1] = x[1]
+            y[2] = x[2]
+        elif near(x[1], delta_y):
+            y[0] = x[0]
+            y[1] = x[1] - delta_y
+            y[2] = x[2]
+        else:
+            y[0] = -1000
+            y[1] = -1000
+            y[2] = -1000
+
+
 
 boundaries = MeshFunction("size_t", mesh, mesh.topology().dim()-1, 0)
 boundaries.set_all(0)
@@ -413,6 +431,10 @@ inlet.mark(boundaries, inlet_ID)
 sides_ID = 4
 sides = Sides()
 sides.mark(boundaries, sides_ID)
+onePoint_ID = 5
+onePoint = OnePoint()
+onePoint.mark(boundaries, onePoint_ID)
+
 
 bmesh = BoundaryMesh(mesh, 'exterior')
 
@@ -436,10 +458,11 @@ xdmf.write(boundaries)
 
 Re = 395. # 120. # not used!!
 #u_bar = Re*nu_val/delta_z
-u_max = delta_pressure_val/4/nu_val*delta_z**2
-print(u_max)
-Re_posteriori = u_max/nu_val*delta_z
-print(Re_posteriori)
+char_L=delta_z/2.
+u_max =  delta_pressure_val/2/nu_val*(char_L)**2 #1.5#
+print("Max velocity", u_max)
+Re_posteriori = u_max/nu_val*char_L
+print("Reynolds a posteriori ",Re_posteriori)
 #u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0.", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
 u_in = Expression(("u_max*4*x[2]*(delta_z-x[2])/delta_z/delta_z", "0.", "0."), t=0, delta_z = delta_z, u_max=u_max, nu=nu, delta_pressure=delta_pressure, degree=2) 
 p_in = Expression('0', degree=1)
@@ -588,13 +611,15 @@ J = derivative(F, up, delta_up)
 
 walls_bc       = DirichletBC(W.sub(0), Constant((0., 0., 0.)), boundaries, walls_ID )
 sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
-inlet_bc       = DirichletBC(W.sub(1), Constant(1.),       boundaries, inlet_ID )
+inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
 outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
+onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
+
 
 if boundary_tag == "strong":
-    bc = [inlet_bc, outlet_bc, sides_bc, walls_bc]
+    bc = [onePoint_bc, walls_bc] #, sides_bc
 else:
-    bc = [inlet_bc, outlet_bc, sides_bc]#, walls_bc]
+    bc = [onePoint_bc]#, walls_bc] #, sides_bc
 
 snes_solver_parameters = {"nonlinear_solver": "snes",
                           "snes_solver": {"linear_solver": "mumps",
