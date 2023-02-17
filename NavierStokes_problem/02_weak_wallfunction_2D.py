@@ -19,11 +19,134 @@ from scipy.sparse.linalg import spsolve
 from scipy.optimize import bisect
 
 giovanni = False
-boundary_tag = "strong"#"spalding"#"weak" #"strong" #  
+boundary_tag = "strong" # "spalding"#"weak" # 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
+
+
+
+
+delta_x = 2*pi
+#delta_y = 2
+delta_z = 2/3*pi
+rx = 10
+#ry = 5
+rz = 10
+Nx = int(rx*delta_x)
+#Ny = int(ry*delta_y)
+Nz = int(rz*delta_z)
+
+dx_mesh = delta_x/Nx
+dz_mesh = delta_z/Nx
+
+
+delta_pressure_val = 3.37204e-3 
+delta_pressure = Constant(delta_pressure_val)
+nu_val = 1.472e-4
+nu = Constant(nu_val)
+f = Constant((delta_pressure_val,0.))
+q_degree = 3
+dx = dx(metadata={'quadrature_degree': q_degree})
+ 
+# Create mesh
+mesh = RectangleMesh(Point(0,0),Point(delta_x,delta_z),Nx,Nz)
+
+# Create subdomains
+subdomains = MeshFunction("size_t", mesh, 2)
+subdomains.set_all(0)
+
+# Create boundaries
+class Walls(SubDomain):
+    def inside(self, x, on_boundary):
+        return on_boundary and \
+            (abs(x[1]) < DOLFIN_EPS or abs(x[1] - delta_z) < DOLFIN_EPS)
+
+# Sub domain for Periodic boundary condition
+class PeriodicBoundary(SubDomain):
+
+    # Left boundary is "target domain" G
+    def inside(self, x, on_boundary):
+        return on_boundary and bool(near(x[0],0))
+
+    # Map right boundary (H) to left boundary (G)
+    def map(self, x, y):
+        #if near(x[0],delta_x):
+            y[0] = x[0] - delta_x
+            y[1] = x[1]
+
+class OnePoint(SubDomain):
+    # x=y=z=0      to set pressure in one point
+    def inside(self, x, on_boundary):
+        return on_boundary and \
+           (abs(x[0]-1.5*dx_mesh) < 1.01*dx_mesh and abs(x[1]) < dz_mesh)
+
+
+class AllBoundary(SubDomain):
+    def inside(self, x, on_boundary):
+        return on_boundary
+
+boundaries = MeshFunction("size_t", mesh, mesh.topology().dim()-1, 0)
+boundaries.set_all(0)
+walls_ID = 1
+walls = Walls()
+walls.mark(boundaries, walls_ID)
+onePoint_ID = 5
+onePoint = OnePoint()
+onePoint.mark(boundaries, onePoint_ID)
+
+bmesh = BoundaryMesh(mesh, 'exterior')
+
+ds_bc = Measure('ds', domain=mesh, subdomain_data=boundaries, subdomain_id=1, metadata = {'quadrature_degree': 2})
+
+# Save to xml file
+File("Rectangular.xml") << mesh
+File("Rectangular_physical_region.xml") << subdomains
+File("Rectangular_facet_region.xml") << boundaries
+
+# Save to pvd file for visualization
+xdmf = XDMFFile(mesh.mpi_comm(), "Rectangular_mesh.xdmf")
+xdmf.write(mesh)
+xdmf = XDMFFile(mesh.mpi_comm(), "Rectangular_physical_region.xdmf")
+subdomains.rename("subdomains", "subdomains")
+xdmf.write(subdomains)
+xdmf = XDMFFile(mesh.mpi_comm(), "Rectangular_facet_region.xdmf")
+boundaries.rename("boundaries", "boundaries")
+xdmf.write(boundaries)
+
+
+Re = 395. # 120. # not used!!
+#u_bar = Re*nu_val/delta_z
+char_L=delta_z/2.
+print("Theoretical u_max ", delta_pressure_val/2/nu_val*(char_L)**2)
+u_max =   delta_pressure_val/2/nu_val*(char_L)**2 #1.5#
+print("Max velocity", u_max)
+Re_posteriori = u_max/nu_val*char_L
+print("Reynolds a posteriori ",Re_posteriori)
+#u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
+u_in = Expression(("u_max*4*x[1]*(delta_z-x[1])/delta_z/delta_z", "0."), t=0, delta_z = delta_z, u_max=u_max, degree=2) 
+p_in = Expression('0', degree=1)
+# nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
+
+dt = 10*delta_x/Nx/u_max
+T = 2000 * dt # should be 15 to generate the video
+
+"""### Function spaces"""
+pbc = PeriodicBoundary()
+V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
+Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
+W_element = MixedElement(V_element, Q_element) 
+W = FunctionSpace(mesh, W_element, constrained_domain=PeriodicBoundary())
+print(W.dim())
+
+
+
+dg0_element = FiniteElement("DG", mesh.ufl_cell(),0)
+V0 = FunctionSpace(mesh, dg0_element)
+dg0_bound_element = FiniteElement("DG", bmesh.ufl_cell(),0)
+V0_bound = FunctionSpace(bmesh, dg0_bound_element)
+
 
 def get_DG_inverse_matrix(VDG):
     """
@@ -326,168 +449,7 @@ def strongResidual(u,p,nu,u_t,f):
     r_C = div(u)
     return r_M, r_C
 
-delta_x = 2*pi
-delta_y = 2
-delta_z = 2/3*pi
-rx = 5
-ry = 5
-rz = 5
-Nx = int(rx*delta_x)
-Ny = int(ry*delta_y)
-Nz = int(rz*delta_z)
 
-dx_mesh = delta_x/Nx
-dy_mesh = delta_y/Nx
-dz_mesh = delta_z/Nx
-
-delta_pressure_val = 3.37204e-3 
-delta_pressure = Constant(delta_pressure_val)
-nu_val = 1.472e-4
-nu = Constant(nu_val)
-f = Constant((delta_pressure_val,0.,0.))
-q_degree = 3
-dx = dx(metadata={'quadrature_degree': q_degree})
- 
-# Create mesh
-mesh = BoxMesh(Point(0,0,0),Point(delta_x,delta_y,delta_z),Nx,Ny,Nz)
-
-# Create subdomains
-subdomains = MeshFunction("size_t", mesh, 2)
-subdomains.set_all(0)
-
-# Create boundaries
-class Walls(SubDomain):
-    # z=0  +  z=Deltaz for u no-slip walls
-    def inside(self, x, on_boundary):
-        return on_boundary and \
-            (abs(x[2]) < DOLFIN_EPS or abs(x[2] - delta_z) < DOLFIN_EPS)
-        
-class Outlet(SubDomain):
-    # x=Delta x    for pressure (I don't use it)
-    def inside(self, x, on_boundary):
-        return on_boundary and abs(x[0] - delta_x) < DOLFIN_EPS
-        
-class Inlet(SubDomain):
-    # x=0      for pressure (I don't use it)
-    def inside(self, x, on_boundary):
-        return on_boundary and abs(x[0]) < DOLFIN_EPS
-
-class Sides(SubDomain):
-    # y=0 and y=Delta y     I guess there shouldn't be anything here
-    def inside(self, x, on_boundary):
-        return on_boundary and \
-            (abs(x[1]) < DOLFIN_EPS or abs(x[1] - delta_y) < DOLFIN_EPS)
-
-class OnePoint(SubDomain):
-    # x=y=z=0      to set pressure in one point
-    def inside(self, x, on_boundary):
-        return on_boundary and \
-           (abs(x[0]-1.5*dx_mesh) < 1.05*dx_mesh and abs(x[1]-1.5*dy_mesh) < 2.5*dy_mesh and abs(x[2]) < dz_mesh)
-            # (abs(x[0]) < DOLFIN_EPS and abs(x[1]) < DOLFIN_EPS and abs(x[2]) < DOLFIN_EPS)
-
-class AllBoundary(SubDomain):
-    def inside(self, x, on_boundary):
-        return on_boundary
-
-class PeriodicBoundary(SubDomain):
-
-    def inside(self, x, on_boundary):
-        # return True if on left or bottom boundary AND NOT on one of the two slave edges
-        return bool((near(x[0], 0) or near(x[1], 0)) and 
-            (not ( near(x[0], delta_x) or 
-                  near(x[1], delta_y) ) ) and on_boundary)
-
-    def map(self, x, y):
-        if near(x[0], delta_x) and near(x[1], delta_y):
-            y[0] = x[0] - delta_x
-            y[1] = x[1] - delta_y 
-            y[2] = x[2] 
-        elif near(x[0], delta_x):
-            y[0] = x[0] - delta_x
-            y[1] = x[1]
-            y[2] = x[2]
-        elif near(x[1], delta_y):
-            y[0] = x[0]
-            y[1] = x[1] - delta_y
-            y[2] = x[2]
-        else:
-            y[0] = -1000
-            y[1] = -1000
-            y[2] = -1000
-
-
-
-boundaries = MeshFunction("size_t", mesh, mesh.topology().dim()-1, 0)
-boundaries.set_all(0)
-walls_ID = 1
-walls = Walls()
-walls.mark(boundaries, walls_ID)
-outlet_ID = 2
-outlet = Outlet()
-outlet.mark(boundaries, outlet_ID)
-inlet_ID = 3
-inlet = Inlet()
-inlet.mark(boundaries, inlet_ID)
-sides_ID = 4
-sides = Sides()
-sides.mark(boundaries, sides_ID)
-onePoint_ID = 5
-onePoint = OnePoint()
-onePoint.mark(boundaries, onePoint_ID)
-
-
-bmesh = BoundaryMesh(mesh, 'exterior')
-
-ds_bc = Measure('ds', domain=mesh, subdomain_data=boundaries, subdomain_id=1, metadata = {'quadrature_degree': 2})
-
-# Save to xml file
-File("Cylinder.xml") << mesh
-File("Cylinder_physical_region.xml") << subdomains
-File("Cylinder_facet_region.xml") << boundaries
-
-# Save to pvd file for visualization
-xdmf = XDMFFile(mesh.mpi_comm(), "Cylinder_mesh.xdmf")
-xdmf.write(mesh)
-xdmf = XDMFFile(mesh.mpi_comm(), "Cylinder_physical_region.xdmf")
-subdomains.rename("subdomains", "subdomains")
-xdmf.write(subdomains)
-xdmf = XDMFFile(mesh.mpi_comm(), "Cylinder_facet_region.xdmf")
-boundaries.rename("boundaries", "boundaries")
-xdmf.write(boundaries)
-
-
-Re = 395. # 120. # not used!!
-#u_bar = Re*nu_val/delta_z
-char_L=delta_z/2.
-u_max =  delta_pressure_val/2/nu_val*(char_L)**2 #1.5#
-print("Max velocity", u_max)
-Re_posteriori = u_max/nu_val*char_L
-print("Reynolds a posteriori ",Re_posteriori)
-#u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0.", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
-u_in = Expression(("u_max*4*x[2]*(delta_z-x[2])/delta_z/delta_z", "0.", "0."), t=0, delta_z = delta_z, u_max=u_max, nu=nu, delta_pressure=delta_pressure, degree=2) 
-p_in = Expression('0', degree=1)
-# nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
-
-dt = delta_x/Nx/u_max
-T = 200 * dt # should be 15 to generate the video
-
-"""### Function spaces"""
-pbc = PeriodicBoundary()
-V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
-Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
-W_element = MixedElement(V_element, Q_element) # Taylor-Hood
-W = FunctionSpace(mesh, W_element, constrained_domain=PeriodicBoundary())
-Wu = FunctionSpace(mesh, V_element, constrained_domain=PeriodicBoundary())
-Wp = FunctionSpace(mesh, Q_element, constrained_domain=PeriodicBoundary())
-
-print(W.dim())
-
-
-
-dg0_element = FiniteElement("DG", mesh.ufl_cell(),0)
-V0 = FunctionSpace(mesh, dg0_element)
-dg0_bound_element = FiniteElement("DG", bmesh.ufl_cell(),0)
-V0_bound = FunctionSpace(bmesh, dg0_bound_element)
 
 DG_matrix_inv = get_DG_inverse_matrix(V0)
 dofmapV0 = V0.dofmap()
@@ -522,10 +484,10 @@ up_bc = Function(W)
 (u_bc, _) = split(up_bc)
 
 ## BCs for weak boundaries and initial condition perturbation
-u_pert = Expression(('u_max*0.01*sin(25*x[2]*2*pi/delta_z)',\
-    '1e-3*u_max*sin(33*x[0]*2*pi/delta_x)',\
+## BCs for weak boundaries and initial condition perturbation
+u_pert = Expression(('u_max*0.01*sin(25*x[1]*2*pi/delta_z)',\
     '1e-3*u_max*sin(41*x[0]*2*pi/delta_x)'), \
-    degree=4, u_max=u_max, delta_x=delta_x, delta_y=delta_y, delta_z=delta_z)
+    degree=4, u_max=u_max, delta_x=delta_x, delta_z=delta_z)
 
 #u_0 = interpolate(u_in, W.sub(0).collapse())
 u_0 = project(u_in+u_pert, W.sub(0).collapse())
@@ -534,8 +496,6 @@ u_0 = project(u_in+u_pert, W.sub(0).collapse())
 u_bc = interpolate(u_in, W.sub(0).collapse())
 
 p_0 = interpolate(p_in, W.sub(1).collapse())
-
-#u_0.vector().set_local(u_0.vector().get_local()+1e-1*(0.5-random.random(u_0.vector().size())))
 
 assign(up_prev , [u_0,p_0])
 assign(up , [u_0,p_0])
@@ -609,10 +569,10 @@ J = derivative(F, up, delta_up)
 
 """### Boundary conditions (for the solution)"""
 
-walls_bc       = DirichletBC(W.sub(0), Constant((0., 0., 0.)), boundaries, walls_ID )
-sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
-inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
-outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
+walls_bc       = DirichletBC(W.sub(0), Constant((0., 0.)), boundaries, walls_ID )
+#sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
+#inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
+#outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
 onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
 
 
@@ -632,11 +592,11 @@ solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
 if giovanni:
-    outfile_u = File("out_giovanni_"+boundary_tag+"/u.pvd")
-    outfile_p = File("out_giovanni_"+boundary_tag+"/p.pvd")
+    outfile_u = File("out_giovanni_2D_"+boundary_tag+"/u.pvd")
+    outfile_p = File("out_giovanni_2D_"+boundary_tag+"/p.pvd")
 else:
-    outfile_u = File("out_Hughes_"+boundary_tag+"/u.pvd")
-    outfile_p = File("out_Hughes_"+boundary_tag+"/p.pvd")
+    outfile_u = File("out_Hughes_2D_"+boundary_tag+"/u.pvd")
+    outfile_p = File("out_Hughes_2D_"+boundary_tag+"/p.pvd")
 
 
 (u, p) = up.split()
@@ -653,8 +613,7 @@ for i in range(1, K):
     # Solve the nonlinear problem
     # with pipes() as (out, err):
     #solver.solve()
-    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8,
-                                                            "absolute_tolerance":1e-8} })
+    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
     # Store the solution in up_prev
     assign(up_prev, up)
     # Plot
