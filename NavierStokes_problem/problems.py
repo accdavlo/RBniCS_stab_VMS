@@ -21,6 +21,7 @@ class Problem:
             self.mesh = generate_mesh(self.domain,self.Nx)
         elif self.name == "cylinder":
             # Create mesh
+            self.mesh_name = "Cylinder"
             channel = Rectangle(Point(0, 0), Point(2.2, 0.41))
             self.cylinder_diam = 0.1
             cylinder = Circle(Point(0.2, 0.2), self.cylinder_diam/2.)
@@ -31,13 +32,16 @@ class Problem:
     def define_bc(self,W, u_in = None):
         if self.name == "lid-driven_cavity":
             if u_in is None:
-                u_in = Constant(1.)
+                self.u_in = Constant(1.)
+            else:
+                self.u_in = u_in
+
             # Define boundary conditions
             noslip  = DirichletBC(W.sub(0), (0, 0),
                                   "on_boundary && \
                                    (x[0] < DOLFIN_EPS | x[1] < DOLFIN_EPS | \
                                     x[0] > 1.0 - DOLFIN_EPS)")
-            inflow  = DirichletBC(W.sub(0), (u_in, 0), "x[1] > 1.0 - DOLFIN_EPS")
+            inflow  = DirichletBC(W.sub(0), (self.u_in, 0), "x[1] > 1.0 - DOLFIN_EPS")
             #outflow = DirichletBC(Q, 0, "x[0] > 1.0 - DOLFIN_EPS")
 
             class CenterDomain(SubDomain):
@@ -53,7 +57,9 @@ class Problem:
             return self.bcs
         elif self.name == "cylinder":
             if u_in is None:
-                u_in = Constant(500.)
+                self.u_in = Constant(500.)
+            else:
+                self.u_in = u_in
             #boundaries
             inflow   = 'near(x[0], 0)'
             outflow  = 'near(x[0], 2.2)'
@@ -63,15 +69,75 @@ class Problem:
             # Define inflow profile
             inflow_profile = ('u_in*4.0*1.5*x[1]*(0.41 - x[1]) / pow(0.41, 2)', '0')
 
-            bcu_inflow = DirichletBC(W.sub(0), Expression(inflow_profile, degree=2,u_in=u_in), inflow)
-            bcu_walls = DirichletBC(W.sub(0), Constant((0, 0)), walls)
-            bcu_cylinder = DirichletBC(W.sub(0), Constant((0, 0)), cylinder)
-            bcp_outflow = DirichletBC(W.sub(1), Constant(0), outflow)
-            bcu = [bcu_inflow, bcu_walls, bcu_cylinder]
-            bcp = [bcp_outflow]
 
-            self.bcs = [bcu_inflow, bcu_walls, bcu_cylinder,bcp_outflow]
+
+            # Create boundaries
+            class Walls(SubDomain):
+                def inside(self, x, on_boundary):
+                    return on_boundary and \
+                        (near(x[1], 0) or near(x[1], 0.41))
+                    
+            class Outflow(SubDomain):
+                def inside(self, x, on_boundary):
+                    return on_boundary and near(x[0], 2.2)
+                    
+            class Inflow(SubDomain):
+                def inside(self, x, on_boundary):
+                    return on_boundary and near(x[0], 0)
+
+            class Cylinder(SubDomain):
+                def inside(self, x, on_boundary):
+                    return on_boundary and \
+                        (x[0]>0.1 and x[0]<0.3 and x[1]>0.1 and x[1]<0.3)
+
+            class AllBoundary(SubDomain):
+                def inside(self, x, on_boundary):
+                    return on_boundary                        
+            # Create subdomains
+            self.subdomains = MeshFunction("size_t", self.mesh, 2)
+            self.subdomains.set_all(0)
+
+
+            self.boundaries = MeshFunction("size_t", self.mesh, self.mesh.topology().dim()-1, 0)
+            self.boundaries.set_all(0)
+            self.walls_ID = 1
+            self.walls = Walls()
+            self.walls.mark(self.boundaries, self.walls_ID)
+            self.cylinder = Cylinder()
+            self.cylinder.mark(self.boundaries, self.walls_ID)
+
+            self.outflow_ID = 2
+            self.outflow = Outflow()
+            self.outflow.mark(self.boundaries, self.outflow_ID)
+            self.inflow_ID = 3
+            self.inflow = Inflow()
+            self.inflow.mark(self.boundaries, self.inflow_ID)
+
+            self.bmesh = BoundaryMesh(self.mesh, 'exterior')
+
+            self.ds_bc = Measure('ds', domain=self.mesh, \
+                subdomain_data=self.boundaries, \
+                subdomain_id=self.walls_ID, \
+                metadata = {'quadrature_degree': 3})
+
+            self.bcu_inflow = DirichletBC(W.sub(0), Expression(inflow_profile, degree=2,u_in=self.u_in),\
+                 self.boundaries, self.inflow_ID)
+            self.bcu_walls = DirichletBC(W.sub(0), Constant((0, 0)), self.boundaries, self.walls_ID)
+            self.bcp_outflow = DirichletBC(W.sub(1), Constant(0), self.boundaries, self.outflow_ID)
+
+            self.bcu = [self.bcu_inflow, self.bcu_walls]
+            self.bcp = [self.bcp_outflow]
+
+            self.bc_no_walls = [self.bcu_inflow]
+            self.bc_walls = [self.bcu_walls]
+
+            self.bcs = [self.bcu_inflow, self.bcu_walls, self.bcp_outflow]
             return self.bcs
+
+    def get_IC(self):
+        if self.name in ["lid-driven_cavity", "cylinder"]:
+            return Constant((0.0,0.0)) , Constant(0.)
+
 
     def get_reynolds(self,u,nu):
         if self.name=="lid-driven_cavity":

@@ -12,133 +12,89 @@ from numpy import random
 from fenicstools import interpolate_nonmatching_mesh, interpolate_nonmatching_mesh_any
 from utils_PETSc_scipy import PETSc2scipy, inverse_lumping_with_zeros
 
-
+import os
 import petsc4py
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.optimize import bisect
+import matplotlib.pyplot as plt
 
-giovanni = False
-boundary_tag = "strong" # "spalding"#"weak" # 
+from problems import Problem
+
+giovanni = True
+boundary_tag = "strong"#"weak" #"spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
 
+CFL = 0.5
+T = 0.01
+dtplot =0.000001
+Nt_max = 10000
+dT=Constant(1.e-5)
 
+# Create mesh
+Nx=45
+problem_name = "cylinder"#"lid-driven_cavity"#"cylinder"#"lid-driven_cavity"
+physical_problem = Problem(problem_name, Nx)
+mesh = physical_problem.mesh
+space_dim = physical_problem.space_dim
 
+if giovanni:
+    out_folder = "out_"+problem_name+"_test_"+boundary_tag+"_gio"
+else:
+    out_folder = "out_"+problem_name+"_test_"+boundary_tag+"_hughes"
 
-delta_x = 2*pi
-#delta_y = 2
-delta_z = 2/3*pi
-rx = 10
-#ry = 5
-rz = 10
-Nx = int(rx*delta_x)
-#Ny = int(ry*delta_y)
-Nz = int(rz*delta_z)
+try:
+    os.mkdir(out_folder)
+except:
+    print("Folder %s already exists"%(out_folder))
 
-dx_mesh = delta_x/Nx
-dz_mesh = delta_z/Nx
+# Set parameter values
+Re = Constant(1000. )
+nu = Constant(1./Re)
+f = Constant((0., 0.))
+u_top = Constant(500.)
 
-
-delta_pressure_val = 3.37204e-3 
-delta_pressure = Constant(delta_pressure_val)
-nu_val = 1.472e-4
-nu = Constant(nu_val)
-f = Constant((delta_pressure_val,0.))
-q_degree = 3
+q_degree = 5
 dx = dx(metadata={'quadrature_degree': q_degree})
  
-# Create mesh
-mesh = RectangleMesh(Point(0,0),Point(delta_x,delta_z),Nx,Nz)
-
-# Create subdomains
-subdomains = MeshFunction("size_t", mesh, 2)
-subdomains.set_all(0)
-
-# Create boundaries
-class Walls(SubDomain):
-    def inside(self, x, on_boundary):
-        return on_boundary and \
-            (abs(x[1]) < DOLFIN_EPS or abs(x[1] - delta_z) < DOLFIN_EPS)
-
-# Sub domain for Periodic boundary condition
-class PeriodicBoundary(SubDomain):
-
-    # Left boundary is "target domain" G
-    def inside(self, x, on_boundary):
-        return on_boundary and bool(near(x[0],0))
-
-    # Map right boundary (H) to left boundary (G)
-    def map(self, x, y):
-        #if near(x[0],delta_x):
-            y[0] = x[0] - delta_x
-            y[1] = x[1]
-
-class OnePoint(SubDomain):
-    # x=y=z=0      to set pressure in one point
-    def inside(self, x, on_boundary):
-        return on_boundary and \
-           (abs(x[0]-1.5*dx_mesh) < 1.01*dx_mesh and abs(x[1]) < dz_mesh)
-
-
-class AllBoundary(SubDomain):
-    def inside(self, x, on_boundary):
-        return on_boundary
-
-boundaries = MeshFunction("size_t", mesh, mesh.topology().dim()-1, 0)
-boundaries.set_all(0)
-walls_ID = 1
-walls = Walls()
-walls.mark(boundaries, walls_ID)
-onePoint_ID = 5
-onePoint = OnePoint()
-onePoint.mark(boundaries, onePoint_ID)
-
-bmesh = BoundaryMesh(mesh, 'exterior')
-
-ds_bc = Measure('ds', domain=mesh, subdomain_data=boundaries, subdomain_id=1, metadata = {'quadrature_degree': 2})
-
-# Save to xml file
-File("Rectangular.xml") << mesh
-File("Rectangular_physical_region.xml") << subdomains
-File("Rectangular_facet_region.xml") << boundaries
-
-# Save to pvd file for visualization
-xdmf = XDMFFile(mesh.mpi_comm(), "Rectangular_mesh.xdmf")
-xdmf.write(mesh)
-xdmf = XDMFFile(mesh.mpi_comm(), "Rectangular_physical_region.xdmf")
-subdomains.rename("subdomains", "subdomains")
-xdmf.write(subdomains)
-xdmf = XDMFFile(mesh.mpi_comm(), "Rectangular_facet_region.xdmf")
-boundaries.rename("boundaries", "boundaries")
-xdmf.write(boundaries)
-
-
-Re = 395. # 120. # not used!!
-#u_bar = Re*nu_val/delta_z
-char_L=delta_z/2.
-print("Theoretical u_max ", delta_pressure_val/2/nu_val*(char_L)**2)
-u_max =   delta_pressure_val/2/nu_val*(char_L)**2 #1.5#
-print("Max velocity", u_max)
-Re_posteriori = u_max/nu_val*char_L
-print("Reynolds a posteriori ",Re_posteriori)
-#u_in = Expression(("delta_pressure/2/nu*x[2]*(delta_z-x[2])", "0."), t=0, delta_z = delta_z, u_bar=u_bar, nu=nu, delta_pressure=delta_pressure, degree=2) 
-u_in = Expression(("u_max*4*x[1]*(delta_z-x[1])/delta_z/delta_z", "0."), t=0, delta_z = delta_z, u_max=u_max, degree=2) 
-p_in = Expression('0', degree=1)
-# nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
-
-dt = 10*delta_x/Nx/u_max
-T = 2000 * dt # should be 15 to generate the video
-
+ 
 """### Function spaces"""
-pbc = PeriodicBoundary()
+#pbc = PeriodicBoundary()
 V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
 Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
 W_element = MixedElement(V_element, Q_element) 
-W = FunctionSpace(mesh, W_element, constrained_domain=PeriodicBoundary())
+W = FunctionSpace(mesh, W_element)#, constrained_domain=PeriodicBoundary())
 print(W.dim())
+
+physical_problem.define_bc(W, u_top)
+subdomains = physical_problem.subdomains
+boundaries = physical_problem.boundaries
+bmesh      = physical_problem.bmesh
+
+# Save to xml file
+File(out_folder+"/%s.xml"%(physical_problem.mesh_name)) << physical_problem.mesh
+File(out_folder+"/%s_physical_region.xml"%(physical_problem.mesh_name)) << physical_problem.subdomains
+File(out_folder+"/%s_facet_region.xml"%(physical_problem.mesh_name)) << physical_problem.boundaries
+
+# Save to pvd file for visualization
+xdmf = XDMFFile(mesh.mpi_comm(), out_folder+"/Rectangular_mesh.xdmf")
+xdmf.write(mesh)
+xdmf = XDMFFile(mesh.mpi_comm(), out_folder+"/Rectangular_physical_region.xdmf")
+subdomains.rename("subdomains", "subdomains")
+xdmf.write(physical_problem.subdomains)
+xdmf = XDMFFile(mesh.mpi_comm(), out_folder+"/Rectangular_facet_region.xdmf")
+boundaries.rename("boundaries", "boundaries")
+xdmf.write(boundaries)
+
+h = function.specialfunctions.CellDiameter(physical_problem.mesh)
+hmin = physical_problem.mesh.hmin()
+u_max = max(u_top.values())
+
+dt = CFL*hmin/u_max
+
 
 
 
@@ -193,13 +149,42 @@ def solve_spalding_law(u,hb):
     for cell in cells(bmesh):
         cell_index = cell.index() 
         mid_pt = cell.midpoint()
-        i = dofmapV0.dofs()[cell_index]
+        i = dofmapV0_bound.dofs()[cell_index]
         # solving Spalding's law through bisection in a cell
         tau_B_bound.vector()[i] = bisect(spalding_func, 1e-14, 1e5, xtol=1e-12, \
             args=(hb_bound.vector()[i], u_norm.vector()[i], \
                 Chi_Spalding(mid_pt), B_Spalding(mid_pt), C_b_I(mid_pt), nu(mid_pt) ) )
     # Extending the solution vector to the whole mesh
     tau_B_ext = Function(V0)
+    tau_B_ext.vector()[:] = interp_V0_V0_bound@tau_B_bound.vector()
+
+    return tau_B_ext
+
+
+def solve_spalding_law_inout(u,hb, tau_B_ext):
+    """Finding the solution to Spalding's Law at boundary cells
+    Interpolating all functions onto the piecewise discontinuous polynomials on the boundary mesh 
+    (the restriction to the boundary of the cell)
+    In each cell finds the solution to Spalding's law through bisection 
+    (gradient is very steep in a very small region, the function is monotone increasing)
+    """
+    # computing the norm of u and interpolating hb on boundaries
+    u_norm = interpolate_nonmatching_mesh(project(sqrt(dot(u,u)),V0),V0_bound)
+    hb_bound = interpolate_nonmatching_mesh(solve_boundary_problem(hb,V0,DG_matrix_inv) ,V0_bound)
+
+    # solution of Spalding's law
+    tau_B_bound = Function(V0_bound)
+
+    # Loop over boundary cells
+    for cell in cells(bmesh):
+        cell_index = cell.index() 
+        mid_pt = cell.midpoint()
+        i = dofmapV0_bound.dofs()[cell_index]
+        # solving Spalding's law through bisection in a cell
+        tau_B_bound.vector()[i] = bisect(spalding_func, 1e-14, 1e5, xtol=1e-12, \
+            args=(hb_bound.vector()[i], u_norm.vector()[i], \
+                Chi_Spalding(mid_pt), B_Spalding(mid_pt), C_b_I(mid_pt), nu(mid_pt) ) )
+    # Extending the solution vector to the whole mesh
     tau_B_ext.vector()[:] = interp_V0_V0_bound@tau_B_bound.vector()
 
     return tau_B_ext
@@ -311,7 +296,7 @@ def stableNeumannBC(traction,u,v,n,g=None,ds=ds,gamma=Constant(1.0)):
              + gamma*ufl.Min(inner(u,n),Constant(0.0))
              *inner(u_minus_g,v))*ds
 
-def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
+def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds, tau_pen = None, G=None,
                     sym=True, spalding=True, C_pen=Constant(1e3),
                     overPenalize=False):
     """
@@ -346,11 +331,12 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
     hb = 2*sqrt(dot(n,G*n))
     
     # Weak penalty coefficient or Spalding's law coefficient
-    if spalding:
-        tau_pen  = solve_spalding_law(u_prev,hb)
-    else:
-        tau_pen =  C_pen*nu/hb
-    
+    if tau_pen is None:
+        if spalding:
+            tau_pen  = solve_spalding_law(u_prev,hb)
+        else:
+            tau_pen =  C_pen*nu/hb
+
     penalty = tau_pen*dot((u-g),v)*ds
     retval = consistencyTerm + adjointConsistency
     if(overPenalize or sym):
@@ -358,7 +344,7 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
         print("Passing here")
     return retval
 
-def weakHughesBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
+def weakHughesBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds, tau_pen = None,G=None,
                     symmetric=True, spalding=True, gamma=Constant(1.0),
                     C_pen=Constant(1e3), overPenalize=False):
     """
@@ -393,10 +379,11 @@ def weakHughesBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds,G=None,
     hb = 2*sqrt(dot(n,G*n))
     
     # Weak penalty coefficient or Spalding's law coefficient
-    if spalding:
-        tau_pen  = solve_spalding_law(u_prev,hb)
-    else:
-        tau_pen =  C_pen*nu/hb
+    if tau_pen is None:
+        if spalding:
+            tau_pen  = solve_spalding_law(u_prev,hb)
+        else:
+            tau_pen =  C_pen*nu/hb
     
     penalty = tau_pen*dot((u-g),v)*ds
     retval = consistencyTerm + adjointConsistency
@@ -456,11 +443,35 @@ dofmapV0 = V0.dofmap()
 
 dofmapV0_bound = V0_bound.dofmap()
 
-interp_V0_V0_bound=PETSc2scipy(PETScDMCollection.create_transfer_matrix(V0_bound,V0))
 
-tau_B= Function(V0)
+def interp_domain_to_bound_matrix():
+
+    row= []
+    column = []
+    data = []
+
+    for cell in cells(mesh):
+        for myFacet in facets(cell):
+            if myFacet.exterior():
+                mid_facet = myFacet.midpoint().array()
+                for cell_b in cells(bmesh):
+                    if np.linalg.norm(mid_facet-cell_b.midpoint().array(),np.inf)<1e-10:
+                        row.append(dofmapV0.dofs()[cell.index()])
+                        column.append(dofmapV0_bound.dofs()[cell_b.index()])
+                        data.append(1.)
+    
+    interp_mat = sparse.coo_matrix((data, (row, column)), shape=(mesh.num_cells(),bmesh.num_cells()))
+
+    return sparse.csr_matrix(interp_mat)
+
+interp_V0_V0_bound = interp_domain_to_bound_matrix()
+
+
+tau_penalty = Function(V0)
+
 Chi_Spalding = Constant(0.4)
 B_Spalding = Constant(5.5)
+C_pen=Constant(1e3)
 
 n = FacetNormal(mesh)
 G = meshMetric(mesh)
@@ -483,19 +494,23 @@ up_prev = Function(W)
 up_bc = Function(W)
 (u_bc, _) = split(up_bc)
 
-## BCs for weak boundaries and initial condition perturbation
-## BCs for weak boundaries and initial condition perturbation
-u_pert = Expression(('u_max*0.01*sin(25*x[1]*2*pi/delta_z)',\
-    '1e-3*u_max*sin(41*x[0]*2*pi/delta_x)'), \
-    degree=4, u_max=u_max, delta_x=delta_x, delta_z=delta_z)
+# ## BCs for weak boundaries and initial condition perturbation
+# ## BCs for weak boundaries and initial condition perturbation
+# u_pert = Expression(('u_max*0.01*sin(25*x[1]*2*pi/delta_z)',\
+#     '1e-3*u_max*sin(41*x[0]*2*pi/delta_x)'), \
+#     degree=4, u_max=u_max, delta_x=delta_x, delta_z=delta_z)
 
-#u_0 = interpolate(u_in, W.sub(0).collapse())
-u_0 = project(u_in+u_pert, W.sub(0).collapse())
-#u_0 = interpolate(u_in, W.sub(0).collapse())+project(u_pert, W.sub(0).collapse())
+# #u_0 = interpolate(u_in, W.sub(0).collapse())
+# u_0 = project(u_in+u_pert, W.sub(0).collapse())
+# #u_0 = interpolate(u_in, W.sub(0).collapse())+project(u_pert, W.sub(0).collapse())
 
-u_bc = interpolate(u_in, W.sub(0).collapse())
+# u_bc = interpolate(u_in, W.sub(0).collapse())
 
-p_0 = interpolate(p_in, W.sub(1).collapse())
+# p_0 = interpolate(p_in, W.sub(1).collapse())
+
+u_0, p_0 = physical_problem.get_IC()
+u_0 = project(u_0, W.sub(0).collapse())
+p_0 = project(p_0, W.sub(1).collapse())
 
 assign(up_prev , [u_0,p_0])
 assign(up , [u_0,p_0])
@@ -526,6 +541,7 @@ tm = 1/sqrt(denom2)
 tc=1.0/(tm*tr(G))#!/usr/bin/env python
 tcross = outer((tm*rm),(tm*rm))
 
+
 uPrime = -tm*rm
 pPrime = -tc*rc
 
@@ -539,13 +555,13 @@ if giovanni:
         - inner(grad(v),outer(uPrime,uPrime)))*dx
 
     if boundary_tag=="weak":
-        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=False)
+        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, spalding=False)
     elif boundary_tag=="spalding":
-        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, spalding=True)
+        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, spalding=True)
 else:
     #Hughes' version
     r_M, r_C = strongResidual(u,p,nu,u_t,f)
-    tau_M, tau_C = stabilizationParameters(u,nu,G,C_I,C_t,Dt=None,scale=Constant(1.0))
+    tau_M, tau_C = stabilizationParameters(u,nu,G,C_I,C_t,Dt=dT,scale=Constant(1.0))
 
     stab =  (inner( dot(u,2*sym(grad(v)))+grad(q), tau_M * r_M )
            + inner(div(v), tau_C * r_C ))*dx
@@ -556,9 +572,9 @@ else:
         + stab
 
     if boundary_tag=="weak":
-        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=False)
+        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, G=G, spalding=False)
     elif boundary_tag=="spalding":
-        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=True)
+        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, G=G, spalding=True)
 
 
 
@@ -569,17 +585,17 @@ J = derivative(F, up, delta_up)
 
 """### Boundary conditions (for the solution)"""
 
-walls_bc       = DirichletBC(W.sub(0), Constant((0., 0.)), boundaries, walls_ID )
-#sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
-#inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
-#outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
-onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
+# walls_bc       = DirichletBC(W.sub(0), Constant((0., 0.)), boundaries, walls_ID )
+# #sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
+# #inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
+# #outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
+# onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
 
 
 if boundary_tag == "strong":
-    bc = [onePoint_bc, walls_bc] #, sides_bc
+    bc = physical_problem.bcs # [onePoint_bc, walls_bc] #, sides_bc
 else:
-    bc = [onePoint_bc]#, walls_bc] #, sides_bc
+    bc = physical_problem.bc_no_walls # [onePoint_bc]#, walls_bc] #, sides_bc
 
 snes_solver_parameters = {"nonlinear_solver": "snes",
                           "snes_solver": {"linear_solver": "mumps",
@@ -591,32 +607,92 @@ problem = NonlinearVariationalProblem(F, up, bc, J)
 solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
-if giovanni:
-    outfile_u = File("out_giovanni_2D_"+boundary_tag+"/u.pvd")
-    outfile_p = File("out_giovanni_2D_"+boundary_tag+"/p.pvd")
-else:
-    outfile_u = File("out_Hughes_2D_"+boundary_tag+"/u.pvd")
-    outfile_p = File("out_Hughes_2D_"+boundary_tag+"/p.pvd")
+outfile_u = File(out_folder+"/u.pvd")
+outfile_p = File(out_folder+"/p.pvd")
+if boundary_tag in ["spalding", "weak"]:
+    outfile_tau = File(out_folder+"/tau.pvd")
 
+if boundary_tag=="weak":
+    trial_v0 = TrialFunction(V0)
+    tau_penalty_bound = Function(V0)
+    test_v0 = TrialFunction(V0)
+    F_tau = inner(tau_penalty_bound,test_v0)*dx - inner(test_v0,C_pen*nu/hb)*physical_problem.ds_bc
+    solve(F_tau==0,tau_penalty_bound )
+    outfile_tau << tau_penalty_bound
+    
 
 (u, p) = up.split()
 outfile_u << u
 outfile_p << p
 
-K = int(T/dt)
-for i in range(1, K):
+
+time=0.
+it=0
+tplot=0.
+u_norm = interpolate(u_top,V0)
+while time < T and it < Nt_max:
+    if u_norm.vector().max()<1e-8:
+        dt=CFL*hmin
+    else:
+        dt = CFL*project(h/u_norm,V0).vector().min()
+    dT.assign(dt)
+    print("Maximum speed %g"%(u_norm.vector().max()))
+    print("Time %1.5e, final time = %1.5e, dt = %1.5e"%(time,T,dt))
     # Compute the current time
-    t = i*dt
-    print("t =", t)
     # Update the time for the boundary condition
-    u_in.t = t
+    physical_problem.u_in.t = time
     # Solve the nonlinear problem
     # with pipes() as (out, err):
+    if boundary_tag =="spalding":
+        solve_spalding_law_inout(u_prev,hb,tau_penalty)
+
     #solver.solve()
     solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
     # Store the solution in up_prev
     assign(up_prev, up)
     # Plot
     (u, p) = up.split()
-    outfile_u << u
-    outfile_p << p
+
+    u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
+    tplot+= dt
+    time+= dt
+    if tplot > dtplot:
+        print("time = %g"%time)
+        tplot = tplot - dtplot
+        outfile_u << u
+        outfile_p << p
+        if boundary_tag in ["spalding"]:
+            outfile_tau << tau_penalty
+
+outfile_u << u
+outfile_p << p
+if boundary_tag in ["spalding"]:
+    outfile_tau << tau_penalty
+
+plt.figure()
+pp=plot(p); plt.colorbar(pp)
+plt.title("Pressure")
+plt.show(block=False)
+
+plt.figure()
+pp=plot(u[0]); plt.colorbar(pp)
+plt.title("u")
+plt.show(block=False)
+
+plt.figure()
+pp=plot(u[1]); plt.colorbar(pp)
+plt.title("v")
+plt.show(block=False)
+
+
+if boundary_tag in ["spalding"]:
+    plt.figure()
+    pp=plot(tau_penalty); plt.colorbar(pp)
+    plt.title("Tau penalty")
+    plt.show(block=False)
+
+plt.figure()
+pp=plot(u); plt.colorbar(pp)
+plt.title("Velocity")
+plt.show()
+
