@@ -2,6 +2,7 @@ from dolfin import *
 from ufl.geometry import *
 from dolfin.cpp.mesh import *
 from mshr import *
+import numpy as np
 
 # Print log messages only from the root process in parallel
 parameters["std_out_all_processes"] = False;
@@ -90,6 +91,19 @@ class Problem:
                     return on_boundary and \
                         (x[0]>0.1 and x[0]<0.3 and x[1]>0.1 and x[1]<0.3)
 
+            dist = np.inf
+            for i in range(self.mesh.num_vertices()):
+                if near(self.mesh.coordinates()[i][0],2.2):
+                    dist_tmp = np.abs(self.mesh.coordinates()[i][1]-0.205)
+                    if dist_tmp<dist:
+                        center_y = self.mesh.coordinates()[i][1]
+                        dist = dist_tmp
+
+            class CenterDomain(SubDomain):
+                def inside(self, x, on_boundary):
+                    return near(x[0], 2.2, DOLFIN_EPS) and near(x[1], center_y, DOLFIN_EPS)
+
+
             class AllBoundary(SubDomain):
                 def inside(self, x, on_boundary):
                     return on_boundary                        
@@ -113,6 +127,10 @@ class Problem:
             self.inflow = Inflow()
             self.inflow.mark(self.boundaries, self.inflow_ID)
 
+            self.center_domain_ID = 4
+            self.center_domain = CenterDomain()
+            self.center_domain.mark(self.boundaries, self.center_domain_ID)
+
             self.bmesh = BoundaryMesh(self.mesh, 'exterior')
 
             self.ds_bc = Measure('ds', domain=self.mesh, \
@@ -123,15 +141,19 @@ class Problem:
             self.bcu_inflow = DirichletBC(W.sub(0), Expression(inflow_profile, degree=2,u_in=self.u_in),\
                  self.boundaries, self.inflow_ID)
             self.bcu_walls = DirichletBC(W.sub(0), Constant((0, 0)), self.boundaries, self.walls_ID)
-            self.bcp_outflow = DirichletBC(W.sub(1), Constant(0), self.boundaries, self.outflow_ID)
+            self.bcp_outflow  = DirichletBC(W.sub(1), Constant(0), self.boundaries, self.outflow_ID)
+            self.bcp_onePoint = DirichletBC(W.sub(1), Constant(0), self.center_domain, method='pointwise')
 
             self.bcu = [self.bcu_inflow, self.bcu_walls]
-            self.bcp = [self.bcp_outflow]
+#            self.bcp = [self.bcp_outflow]
+            self.bcp = [self.bcp_onePoint]
 
-            self.bc_no_walls = [self.bcu_inflow]
+#            self.bc_no_walls = [self.bcu_inflow, self.bcp_outflow]
+            self.bc_no_walls = [self.bcu_inflow, self.bcp_onePoint]
             self.bc_walls = [self.bcu_walls]
 
-            self.bcs = [self.bcu_inflow, self.bcu_walls, self.bcp_outflow]
+            #self.bcs = [self.bcu_inflow, self.bcu_walls, self.bcp_outflow]
+            self.bcs = [self.bcu_inflow, self.bcu_walls, self.bcp_onePoint]
             return self.bcs
 
     def get_IC(self):

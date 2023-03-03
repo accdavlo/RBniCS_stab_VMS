@@ -21,12 +21,14 @@ import matplotlib.pyplot as plt
 
 from problems import Problem
 
-giovanni = True
-boundary_tag = "strong"#"weak" #"spalding"# 
+giovanni = False
+boundary_tag = "strong"#"spalding"#"strong"#"strong"# "weak" # "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
+
+degree = 1
 
 CFL = 0.5
 T = 0.01
@@ -42,9 +44,9 @@ mesh = physical_problem.mesh
 space_dim = physical_problem.space_dim
 
 if giovanni:
-    out_folder = "out_"+problem_name+"_test_"+boundary_tag+"_gio"
+    out_folder = "out_"+problem_name+"_test_"+boundary_tag+"_gio_P"+str(degree)+"_N_"+str(Nx)
 else:
-    out_folder = "out_"+problem_name+"_test_"+boundary_tag+"_hughes"
+    out_folder = "out_"+problem_name+"_test_"+boundary_tag+"_hughes_P"+str(degree)+"_N_"+str(Nx)
 
 try:
     os.mkdir(out_folder)
@@ -63,8 +65,8 @@ dx = dx(metadata={'quadrature_degree': q_degree})
  
 """### Function spaces"""
 #pbc = PeriodicBoundary()
-V_element = VectorElement("Lagrange", mesh.ufl_cell(), 1)
-Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
+V_element = VectorElement("Lagrange", mesh.ufl_cell(), degree)
+Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
 W_element = MixedElement(V_element, Q_element) 
 W = FunctionSpace(mesh, W_element)#, constrained_domain=PeriodicBoundary())
 print(W.dim())
@@ -514,7 +516,7 @@ p_0 = project(p_0, W.sub(1).collapse())
 
 assign(up_prev , [u_0,p_0])
 assign(up , [u_0,p_0])
-u_t = (u - u_prev)/dt
+u_t = (u - u_prev)/dT
 
 # Preparation of Variational forms.
 #K = JacobianInverse(mesh)
@@ -533,8 +535,8 @@ C_t = Constant(4.0)
 C_b_I = Constant(4.0)
 
 denom2 = inner(u,G*u) + C_I*nu*nu*inner(G,G) + DOLFIN_EPS
-if(dt != None):
-    denom2 += C_t/dt**2
+if(dT != None):
+    denom2 += C_t/dT**2
 
 tm = 1/sqrt(denom2)
 #tm=(4*((dt)**(-2)) + 36*(nu**2)*inner(G,G) + inner(u,G*u))**(-0.5)
@@ -566,7 +568,7 @@ else:
     stab =  (inner( dot(u,2*sym(grad(v)))+grad(q), tau_M * r_M )
            + inner(div(v), tau_C * r_C ))*dx
 
-    F = (inner(u_t,v) - inner(outer(u,u), grad(v))- inner(f,v) # = inner(DuDt, v) 
+    F = (inner(u_t + dot(u,nabla_grad(u))-f,v) # = inner(DuDt, v) 
          + inner(div(u),q)  
          - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
         + stab
