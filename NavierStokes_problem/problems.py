@@ -23,9 +23,19 @@ class Problem:
         elif self.name == "cylinder":
             # Create mesh
             self.mesh_name = "Cylinder"
-            channel = Rectangle(Point(0, 0), Point(2.2, 0.41))
+
+            self.x_left = 0.
+            self.x_right = 2.2
+            self.y_bottom = -0.41
+            self.y_top = 0.41
+            self.x_cylinder_center = 0.2
+            self.y_cylinder_center = 0.0
+            
             self.cylinder_diam = 0.1
-            cylinder = Circle(Point(0.2, 0.2), self.cylinder_diam/2.)
+
+            channel = Rectangle(Point(self.x_left, self.y_bottom),\
+                                Point(self.x_right, self.y_top))
+            cylinder = Circle(Point(self.x_cylinder_center, self.y_cylinder_center), self.cylinder_diam/2., 30)
             self.domain = channel - cylinder
 
             self.mesh = generate_mesh(self.domain,self.Nx)
@@ -61,47 +71,47 @@ class Problem:
                 self.u_in = Constant(500.)
             else:
                 self.u_in = u_in
-            #boundaries
-            inflow   = 'near(x[0], 0)'
-            outflow  = 'near(x[0], 2.2)'
-            walls    = 'near(x[1], 0) || near(x[1], 0.41)'
-            cylinder = 'on_boundary && x[0]>0.1 && x[0]<0.3 && x[1]>0.1 && x[1]<0.3'
 
             # Define inflow profile
-            inflow_profile = ('u_in*4.0*1.5*x[1]*(0.41 - x[1]) / pow(0.41, 2)', '0')
+            inflow_profile = ('u_in*4.0*(x[1] %+g)*(%g - x[1]) / pow(%g, 2)'%(\
+                                -self.y_bottom, self.y_top, self.y_top-self.y_bottom), '0')
 
+            PD = self
 
 
             # Create boundaries
             class Walls(SubDomain):
                 def inside(self, x, on_boundary):
                     return on_boundary and \
-                        (near(x[1], 0) or near(x[1], 0.41))
+                        (near(x[1], PD.y_bottom) or near(x[1], PD.y_top))
                     
             class Outflow(SubDomain):
                 def inside(self, x, on_boundary):
-                    return on_boundary and near(x[0], 2.2)
+                    return on_boundary and near(x[0], PD.x_right)
                     
             class Inflow(SubDomain):
                 def inside(self, x, on_boundary):
-                    return on_boundary and near(x[0], 0)
+                    return on_boundary and near(x[0], PD.x_left)
 
             class Cylinder(SubDomain):
                 def inside(self, x, on_boundary):
                     return on_boundary and \
-                        (x[0]>0.1 and x[0]<0.3 and x[1]>0.1 and x[1]<0.3)
+                        (x[0]>PD.x_cylinder_center-PD.cylinder_diam\
+                         and x[0]<PD.x_cylinder_center+PD.cylinder_diam\
+                         and x[1]>PD.y_cylinder_center-PD.cylinder_diam\
+                         and x[1]<PD.y_cylinder_center+PD.cylinder_diam)
 
             dist = np.inf
             for i in range(self.mesh.num_vertices()):
-                if near(self.mesh.coordinates()[i][0],2.2):
-                    dist_tmp = np.abs(self.mesh.coordinates()[i][1]-0.205)
+                if near(self.mesh.coordinates()[i][0],self.x_right):
+                    dist_tmp = np.abs(self.mesh.coordinates()[i][1]-self.y_cylinder_center)
                     if dist_tmp<dist:
                         center_y = self.mesh.coordinates()[i][1]
                         dist = dist_tmp
 
             class CenterDomain(SubDomain):
                 def inside(self, x, on_boundary):
-                    return near(x[0], 2.2, DOLFIN_EPS) and near(x[1], center_y, DOLFIN_EPS)
+                    return near(x[0], PD.x_right, DOLFIN_EPS) and near(x[1], center_y, DOLFIN_EPS)
 
 
             class AllBoundary(SubDomain):
