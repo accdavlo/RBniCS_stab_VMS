@@ -26,7 +26,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag = "spalding"# "strong"#"weak" # "weak" # "spalding"# 
+boundary_tag =  "strong"#"spalding"# "weak" # "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -34,18 +34,33 @@ parameters.parse(argv = argv[0:1] + args.split())
 
 degree = 1
 
+
+Nx=50
+problem_name = "cylinder_turb"#"cylinder"#"lid-driven_cavity"
+
 CFL = 0.5
-T = 0.0001
-dtplot =0.000001
+dtplot =0.0000000001
 Nt_max = 10000
 dT=Constant(1.e-5)
 
-nu_val = 0.001
-u_top_val = 500.
+if problem_name=="cylinder_turb":
+    # Rey = 5 10^4 
+    T = 5.0    #5.0    #0.5 # 0.01
+    nu_val =  0.000002 #0.000002 #1. # 0.001
+    u_top_val = 1. #1.  #100.  # 500
+elif problem_name=="cylinder":
+    # Rey = 100 
+    T = 5.0    #5.0    #0.5 # 0.01
+    nu_val =  0.001 #0.000002 #1. # 0.001
+    u_top_val = 1. #1.  #100.  # 500
 
-# Create mesh
-Nx=120
-problem_name = "cylinder"#"lid-driven_cavity"#"cylinder"#"lid-driven_cavity"
+
+
+C_I = Constant(36.0)
+C_t = Constant(4.0)
+C_b_I_value = 4.0
+C_b_I = Constant(C_b_I_value)
+
 physical_problem = Problem(problem_name, Nx)
 mesh = physical_problem.mesh
 space_dim = physical_problem.space_dim
@@ -285,6 +300,7 @@ def materialTimeDerivative(u,u_t=None,f=None):
     if(f != None):
         DuDt -= f
     return DuDt
+
 def meshMetric(mesh):
     """
     Extract mesh size tensor from a given ``mesh``.
@@ -324,7 +340,7 @@ def stableNeumannBC(traction,u,v,n,g=None,ds=ds,gamma=Constant(1.0)):
         u_minus_g = u-g
     return -(inner(traction,v)
             + gamma*ufl.Min(inner(u,n),Constant(0.0))
-            *inner(u_minus_g,v))*ds
+            *inner(u_minus_g,v))*ds(physical_problem.walls_ID)
 
 def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds, tau_pen = None, G=None,
                     sym=True, spalding=True, C_pen=Constant(1e3),
@@ -352,22 +368,22 @@ def weakDirichletBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds, tau_pen = None, G=None,
     if(not sym):
         sgn = -1.0
     if G == None:
-        G = meshMetric(mesh) # $\sim h^{-2}$
+        G =  meshMetric(mesh) # $\sim h^{-2}$
     traction = sigma(u,p,nu)*n
     consistencyTerm = stableNeumannBC(traction,u,v,n,g=g,ds=ds)
     # Note sign of ``q``, negative for stability, regardless of ``sym``.    
-    adjointConsistency = -sgn*dot(sigma(v,-sgn*q,nu)*n,u-g)*ds
+    adjointConsistency = -sgn*dot(sigma(v,-sgn*q,nu)*n,u-g)*ds(physical_problem.walls_ID)
     # Only term we need to change
-    hb = 2*sqrt(dot(n,G*n))
+    hb = 2/sqrt(dot(n,G*n))
     
     # Weak penalty coefficient or Spalding's law coefficient
     if tau_pen is None:
         if spalding:
             tau_pen  = solve_spalding_law(u_prev,hb)
         else:
-            tau_pen =  C_pen*nu/hb
+            tau_pen =  C_pen*nu/hb 
 
-    penalty = tau_pen*dot((u-g),v)*ds
+    penalty = tau_pen*dot((u-g),v)*ds(physical_problem.walls_ID)
     retval = consistencyTerm + adjointConsistency
     if(overPenalize or sym):
         retval += penalty
@@ -401,12 +417,11 @@ def weakHughesBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds, tau_pen = None,G=None,
         sgn = -1.0
     if G == None:
         G = meshMetric(mesh) # $\sim h^{-2}$
-
-    consistencyTerm = -sgn*inner(2*nu*sym(grad(u))*n,v)*ds
-    adjointConsistency = -sgn*inner(2*gamma*nu*sym(grad(v))*n,u-g)*ds
+    consistencyTerm = -sgn*inner(2*nu*sym(grad(u))*n,v)*ds(physical_problem.walls_ID)
+    adjointConsistency = -sgn*inner(2*gamma*nu*sym(grad(v))*n,u-g)*ds(physical_problem.walls_ID)
 
     # Only term we need to change
-    hb = 2*sqrt(dot(n,G*n))
+    hb = 2/sqrt(dot(n,G*n))
     
     # Weak penalty coefficient or Spalding's law coefficient
     if tau_pen is None:
@@ -415,7 +430,7 @@ def weakHughesBC(u,p,u_prev,v,q,g,nu,mesh,ds=ds, tau_pen = None,G=None,
         else:
             tau_pen =  C_pen*nu/hb
     
-    penalty = tau_pen*dot((u-g),v)*ds
+    penalty = dot(tau_pen*(u-g),v)*ds(physical_problem.walls_ID)
     retval = consistencyTerm + adjointConsistency
     if(overPenalize or symmetric):
         retval += penalty
@@ -436,6 +451,21 @@ def strongResidual(u,p,nu,u_t=None,f=None):
     r_C = div(u)
     return r_M, r_C
 
+
+def strongResidualHughes(u,p,nu,u_t,f=None):
+    """
+    The momentum and continuity residuals, as a tuple, of the strong PDE,
+    system, in terms of velocity ``u``, pressure ``p``, dynamic viscosity
+    ``nu``, mass density ``rho``, and, optionally, the partial time derivative
+    of velocity, ``u_t``, and a body force per unit mass, ``f``.  
+    """
+    if f is None:
+        f = Constant((0.,0.))
+    r_M = u_t  + ufl.nabla_div(outer(u,u)) +grad(p) \
+        - ufl.nabla_div(2*nu*sym(grad(u))) -f
+    r_C = div(u)
+    return r_M, r_C
+
 def stabilizationParameters(u,nu,G,C_I,C_t,Dt=None,scale=Constant(1.0)):
     """
     Compute SUPS and LSIC/grad-divx stabilization parameters (returned as a
@@ -452,19 +482,6 @@ def stabilizationParameters(u,nu,G,C_I,C_t,Dt=None,scale=Constant(1.0)):
     tau_M = scale/sqrt(denom2)
     tau_C = 1.0/(tau_M*tr(G))
     return tau_M, tau_C
-
-def strongResidual(u,p,nu,u_t,f):
-    """
-    The momentum and continuity residuals, as a tuple, of the strong PDE,
-    system, in terms of velocity ``u``, pressure ``p``, dynamic viscosity ``nu``,
-    the partial time derivative of velocity ``u_t``, and a body force per unit mass
-    ``f``.  
-    """
-    DuDt = materialTimeDerivative(u,u_t,f)
-    i,j = ufl.indices(2)
-    r_M = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,))  # if P1 last term zero
-    r_C = div(u)
-    return r_M, r_C
 
 
 
@@ -510,8 +527,8 @@ C_pen_value = 1e3
 C_pen=Constant(C_pen_value)
 
 n = FacetNormal(mesh)
-G = meshMetric(mesh)
-hb = 2*sqrt(dot(n,G*n))
+G = meshMetric(mesh) # proportional to h^{-2}
+hb = 2./sqrt(dot(n,G*n)) # proportional to h in normal direction
 
 
 
@@ -540,6 +557,7 @@ up_prev = Function(W)
 (u_prev, _) = split(up_prev)
 up_bc = Function(W)
 (u_bc, _) = split(up_bc)
+u_bc = Constant((0.,0.))
 
 # ## BCs for weak boundaries and initial condition perturbation
 # ## BCs for weak boundaries and initial condition perturbation
@@ -575,10 +593,6 @@ i,j = ufl.indices(2)
 rm = DuDt - as_tensor(grad(sigma(u,p,nu))[i,j,j],(i,)) # if u \in P1 last term is zero (second derivative)! 
 rc = div(u)
 
-C_I = Constant(36.0)
-C_t = Constant(4.0)
-C_b_I_value = 4.0
-C_b_I = Constant(C_b_I_value)
 
 denom2 = inner(u,G*u) + C_I*nu*nu*inner(G,G) + DOLFIN_EPS
 if(dT != None):
@@ -603,12 +617,13 @@ if giovanni:
         - inner(grad(v),outer(uPrime,uPrime)))*dx
 
     if boundary_tag=="weak":
-        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, spalding=False)
+        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, spalding=False, C_pen = C_b_I)
     elif boundary_tag=="spalding":
         F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, spalding=True)
 else:
     #Hughes' version
     r_M, r_C = strongResidual(u,p,nu,u_t,f)
+#    r_M, r_C = strongResidualHughes(u,p,nu,u_t,f)
     tau_M, tau_C = stabilizationParameters(u,nu,G,C_I,C_t,Dt=dT,scale=Constant(1.0))
 
     stab =  (inner( dot(u,2*sym(grad(v)))+grad(q), tau_M * r_M )
@@ -618,9 +633,15 @@ else:
         + inner(div(u),q)  
         - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
         + stab
+    # F = (inner(u_t -f,v) -  inner(outer(u,u),grad(v)) # = inner(DuDt, v) 
+    #     + inner(div(u),q)  
+    #     - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
+    #     + stab \
+    #     + dot(u,v)*dot(u,n)*ds
+
 
     if boundary_tag=="weak":
-        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, G=G, spalding=False)
+        F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, G=G, spalding=False, C_pen = C_b_I)
     elif boundary_tag=="spalding":
         F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, G=G, spalding=True)
 
@@ -700,7 +721,7 @@ while time < T and it < Nt_max:
         print("Spalding time %e"%toc_spalding)
 
     #solver.solve()
-    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
+    solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
     # Store the solution in up_prev
     assign(up_prev, up)
     # Plot

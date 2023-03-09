@@ -20,7 +20,7 @@ class Problem:
             self.domain = Rectangle(Point(0., 0.), Point(1., 1.))
 
             self.mesh = generate_mesh(self.domain,self.Nx)
-        elif self.name == "cylinder":
+        elif "cylinder" in self.name:
             # Create mesh
             self.mesh_name = "Cylinder"
 
@@ -39,6 +39,7 @@ class Problem:
             self.domain = channel - cylinder
 
             self.mesh = generate_mesh(self.domain,self.Nx)
+
 
     def define_bc(self,W, u_in = None):
         if self.name == "lid-driven_cavity":
@@ -66,15 +67,18 @@ class Problem:
 
             self.bcs = [inflow, noslip, bc_one_point]
             return self.bcs
-        elif self.name == "cylinder":
+        elif "cylinder" in self.name:
             if u_in is None:
-                self.u_in = Constant(500.)
+                self.u_in = Constant(1.)
             else:
                 self.u_in = u_in
 
+            # # Define inflow profile
+            # inflow_profile = ('u_in*4.0*(x[1] %+g)*(%g - x[1]) / pow(%g, 2)'%(\
+            #                     -self.y_bottom, self.y_top, self.y_top-self.y_bottom), '0')
+
             # Define inflow profile
-            inflow_profile = ('u_in*4.0*(x[1] %+g)*(%g - x[1]) / pow(%g, 2)'%(\
-                                -self.y_bottom, self.y_top, self.y_top-self.y_bottom), '0')
+            inflow_profile = ('u_in', '0')
 
             PD = self
 
@@ -167,18 +171,18 @@ class Problem:
             return self.bcs
 
     def get_IC(self):
-        if self.name in ["lid-driven_cavity", "cylinder"]:
+        if self.name in ["lid-driven_cavity", "cylinder", "cylinder_turb"]:
             return Constant((0.0,0.0)) , Constant(0.)
 
 
     def get_reynolds(self,u,nu):
         if self.name=="lid-driven_cavity":
             return u/nu
-        elif self.name=="cylinder":
+        elif "cylinder" in self.name:
             return u/nu * self.cylinder_diam
 
     def get_viscosity(self,u,Re):
         if self.name=="lid-driven_cavity":
             return u/Re
-        elif self.name=="cylinder":
+        elif "cylinder" in self.name:
             return u/Re * self.cylinder_diam
