@@ -35,7 +35,7 @@ parameters.parse(argv = argv[0:1] + args.split())
 degree = 1
 
 
-Nx=50
+Nx=30
 problem_name = "cylinder_turb"#"cylinder"#"lid-driven_cavity"
 
 CFL = 0.5
@@ -45,7 +45,7 @@ dT=Constant(1.e-5)
 
 if problem_name=="cylinder_turb":
     # Rey = 5 10^4 
-    T = 5.0    #5.0    #0.5 # 0.01
+    T = 0.1 #5.0    #5.0    #0.5 # 0.01
     nu_val =  0.000002 #0.000002 #1. # 0.001
     u_top_val = 1. #1.  #100.  # 500
 elif problem_name=="cylinder":
@@ -676,27 +676,40 @@ problem = NonlinearVariationalProblem(F, up, bc, J)
 solver  = NonlinearVariationalSolver(problem)
 solver.parameters.update(snes_solver_parameters)
 
-outfile_u = File(out_folder+"/u.pvd")
-outfile_p = File(out_folder+"/p.pvd")
-if boundary_tag in ["spalding", "weak"]:
-    outfile_tau = File(out_folder+"/tau.pvd")
+# outfile_u = File(out_folder+"/u.pvd")
+# outfile_p = File(out_folder+"/p.pvd")
+# if boundary_tag in ["spalding", "weak"]:
+#     outfile_tau = File(out_folder+"/tau.pvd")
 
+
+outfile_u = XDMFFile(out_folder+"/u.xdmf")
+outfile_p = XDMFFile(out_folder+"/p.xdmf")
+if boundary_tag in ["spalding", "weak"]:
+    outfile_tau = XDMFFile(out_folder+"/tau.xdmf")
+
+
+time=0.
 if boundary_tag=="weak":
     trial_v0 = TrialFunction(V0)
     tau_penalty_bound = Function(V0)
     test_v0 = TrialFunction(V0)
     F_tau = inner(tau_penalty_bound,test_v0)*dx - inner(test_v0,C_pen*nu/hb)*physical_problem.ds_bc
     solve(F_tau==0,tau_penalty_bound )
-    outfile_tau << tau_penalty_bound
+    # outfile_tau << tau_penalty_bound
+    outfile_tau.write_checkpoint(tau_penalty_bound, "tau", time, XDMFFile.Encoding.HDF5, False)
     
 
 (u, p) = up.split()
-outfile_u << u
-outfile_p << p
+# outfile_u << u
+# outfile_p << p
+
+outfile_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=False)
+outfile_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=False)
+
 
 tic= time_module.time()
 
-time=0.
+
 it=0
 tplot=0.
 u_norm = interpolate(u_top,V0)
@@ -738,10 +751,15 @@ while time < T and it < Nt_max:
     if tplot > dtplot:
         print("time = %g"%time)
         tplot = tplot - dtplot
-        outfile_u << u
-        outfile_p << p
+        outfile_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=True)
+        outfile_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=True)
         if boundary_tag in ["spalding"]:
-            outfile_tau << tau_penalty
+            outfile_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, append=True)
+
+        # outfile_u << u
+        # outfile_p << p
+        # if boundary_tag in ["spalding"]:
+        #     outfile_tau << tau_penalty
 
 toc =  time_module.time()-tic
 print("computational time %g"%toc)
@@ -749,10 +767,16 @@ print("computational time %g"%toc)
 with open(out_folder+"/computational_time.npy",'wb') as file:
     np.save(file,toc)
 
-outfile_u << u
-outfile_p << p
+
+outfile_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, True)
+outfile_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, True)
 if boundary_tag in ["spalding"]:
-    outfile_tau << tau_penalty
+    outfile_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, True)
+
+# outfile_u << u
+# outfile_p << p
+# if boundary_tag in ["spalding"]:
+#     outfile_tau << tau_penalty
 
 plt.figure()
 pp=plot(p); plt.colorbar(pp)
@@ -779,5 +803,5 @@ if boundary_tag in ["spalding"]:
 plt.figure()
 pp=plot(u); plt.colorbar(pp)
 plt.title("Velocity")
-#plt.show()
+plt.show()
 
