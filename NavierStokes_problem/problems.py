@@ -35,53 +35,15 @@ class Problem:
 
             channel = Rectangle(Point(self.x_left, self.y_bottom),\
                                 Point(self.x_right, self.y_top))
-            cylinder = Circle(Point(self.x_cylinder_center, self.y_cylinder_center), self.cylinder_diam/2., 30)
+            cylinder = Circle(Point(self.x_cylinder_center, self.y_cylinder_center), self.cylinder_diam/2., 40)
             self.domain = channel - cylinder
 
             self.mesh = generate_mesh(self.domain,self.Nx)
 
 
-    def define_bc(self,W, u_in = None):
-        if self.name == "lid-driven_cavity":
-            if u_in is None:
-                self.u_in = Constant(1.)
-            else:
-                self.u_in = u_in
-
-            # Define boundary conditions
-            noslip  = DirichletBC(W.sub(0), (0, 0),
-                                  "on_boundary && \
-                                   (x[0] < DOLFIN_EPS | x[1] < DOLFIN_EPS | \
-                                    x[0] > 1.0 - DOLFIN_EPS)")
-            inflow  = DirichletBC(W.sub(0), (self.u_in, 0), "x[1] > 1.0 - DOLFIN_EPS")
-            #outflow = DirichletBC(Q, 0, "x[0] > 1.0 - DOLFIN_EPS")
-
-            class CenterDomain(SubDomain):
-                def inside(self, x, on_boundary):
-                    return near(x[0], 0.5, DOLFIN_EPS) and near(x[1], 0.5, DOLFIN_EPS)
-            center_domain = CenterDomain()
-
-            g2 = Constant(0.)
-            bc_one_point = DirichletBC(W.sub(1), g2, center_domain, method='pointwise')
-
-
-            self.bcs = [inflow, noslip, bc_one_point]
-            return self.bcs
-        elif "cylinder" in self.name:
-            if u_in is None:
-                self.u_in = Constant(1.)
-            else:
-                self.u_in = u_in
-
-            # # Define inflow profile
-            # inflow_profile = ('u_in*4.0*(x[1] %+g)*(%g - x[1]) / pow(%g, 2)'%(\
-            #                     -self.y_bottom, self.y_top, self.y_top-self.y_bottom), '0')
-
-            # Define inflow profile
-            inflow_profile = ('u_in', '0')
-
+    def define_boundaries(self, W):
+        if "cylinder" in self.name:
             PD = self
-
 
             # Create boundaries
             class Walls(SubDomain):
@@ -151,6 +113,47 @@ class Problem:
                 subdomain_data=self.boundaries, \
                 subdomain_id=self.walls_ID, \
                 metadata = {'quadrature_degree': 3})
+
+    def define_bc(self,W, u_in = None):
+        if self.name == "lid-driven_cavity":
+            if u_in is None:
+                self.u_in = Constant(1.)
+            else:
+                self.u_in = u_in
+
+            # Define boundary conditions
+            noslip  = DirichletBC(W.sub(0), (0, 0),
+                                  "on_boundary && \
+                                   (x[0] < DOLFIN_EPS | x[1] < DOLFIN_EPS | \
+                                    x[0] > 1.0 - DOLFIN_EPS)")
+            inflow  = DirichletBC(W.sub(0), (self.u_in, 0), "x[1] > 1.0 - DOLFIN_EPS")
+            #outflow = DirichletBC(Q, 0, "x[0] > 1.0 - DOLFIN_EPS")
+
+            class CenterDomain(SubDomain):
+                def inside(self, x, on_boundary):
+                    return near(x[0], 0.5, DOLFIN_EPS) and near(x[1], 0.5, DOLFIN_EPS)
+            center_domain = CenterDomain()
+
+            g2 = Constant(0.)
+            bc_one_point = DirichletBC(W.sub(1), g2, center_domain, method='pointwise')
+
+
+            self.bcs = [inflow, noslip, bc_one_point]
+            return self.bcs
+        elif "cylinder" in self.name:
+            if u_in is None:
+                self.u_in = Constant(1.)
+            else:
+                self.u_in = u_in
+
+            # # Define inflow profile
+            # inflow_profile = ('u_in*4.0*(x[1] %+g)*(%g - x[1]) / pow(%g, 2)'%(\
+            #                     -self.y_bottom, self.y_top, self.y_top-self.y_bottom), '0')
+
+            # Define inflow profile
+            inflow_profile = ('u_in', '0')
+
+
 
             self.bcu_inflow = DirichletBC(W.sub(0), Expression(inflow_profile, degree=2,u_in=self.u_in),\
                  self.boundaries, self.inflow_ID)

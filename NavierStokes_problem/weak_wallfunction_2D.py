@@ -19,42 +19,112 @@ from scipy.sparse.linalg import spsolve
 from scipy.optimize import bisect
 import matplotlib.pyplot as plt
 
+from rbnics.backends import BasisFunctionsMatrix, ProperOrthogonalDecomposition, max as rbnics_max, abs as rbnics_abs
+from rbnics.backends.dolfin.snapshots_matrix import SnapshotsMatrix
+from rbnics.utils.io import TextIO, ExportableList
+
+
 from multiprocessing import Pool
 
 
 from problems import Problem
+import random
+random.seed(a=5)
 
 
 giovanni = True
-boundary_tag =  "strong"#"spalding"# "weak" # "spalding"# 
+boundary_tag =  "weak" # "strong"#"spalding"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
 
-degree = 1
+degree = 2
 
 
-Nx=30
+Nx = 100
 problem_name = "cylinder_turb"#"cylinder"#"lid-driven_cavity"
 
 CFL = 0.5
-dtplot =0.0000000001
 Nt_max = 10000
 dT=Constant(1.e-5)
 
+
+
+
+
+class Parameter():
+    def __init__(self,param_range):
+        self.dim = len(param_range)
+        self.param_range = param_range
+    def generate_training_set(self, N=100):
+        self.N_train = N
+        self.training_set = []
+        for i in range(self.N_train):
+            unif_rand = [random.random() for k in range(self.dim)]
+            new_param = [ self.param_range[k][0] +\
+                 unif_rand[k]*\
+                (self.param_range[k][1]-self.param_range[k][0]) \
+                for k in range(self.dim) ]
+            self.training_set.append(new_param)
+    
+    def generate_test_set(self, N=100):
+        self.N_train = N
+        self.test_set = []
+        for i in range(self.N_train):
+            unif_rand = np.random.rand(self.dim)
+            new_param = [ self.param_range[k][0] +\
+                 unif_rand[k]*\
+                (self.param_range[k][1]-self.param_range[k][0]) \
+                for k in range(self.dim) ]
+            self.test_set.append(new_param)
+
+
+
+
+
 if problem_name=="cylinder_turb":
     # Rey = 5 10^4 
-    T = 0.1 #5.0    #5.0    #0.5 # 0.01
+    T = 3.0    #5.0    #0.5 # 0.01
+    dtplot =0.02
     nu_val =  0.000002 #0.000002 #1. # 0.001
-    u_top_val = 1. #1.  #100.  # 500
+    u_top_val = 1. #1.  #100.  # 500 
+    param_range = [ [0.5,5.0],# u_in
+                [0.000002,0.00002] # nu
+                ]
 elif problem_name=="cylinder":
     # Rey = 100 
-    T = 5.0    #5.0    #0.5 # 0.01
+    T = 3.0    #5.0    #0.5 # 0.01
     nu_val =  0.001 #0.000002 #1. # 0.001
     u_top_val = 1. #1.  #100.  # 500
 
+    param_range = [ [0.5,5.0],# u_in
+                [0.0002,0.005] # nu
+                ]
 
+param_set = Parameter(param_range)
+
+
+
+def generate_inner_products(V):
+
+    trial = TrialFunction(V)
+    test = TestFunction(V)
+
+    u, p = split(trial)
+    v, q = split(test)
+    # Inner products for orthonormalization
+    X = dict()
+
+    # Definition of the scalar product in the space V1 (used for pressure supremizers as well)
+    
+    X["u"] = assemble(inner(grad(u), grad(v)) * dx + inner(u,v)*dx)
+    X["p"] = assemble(inner(p, q) * dx)
+
+    return X
+
+# POD_variables = dict() 
+# ProperOrthogonalDecomposition(V, X_rho)
 
 C_I = Constant(36.0)
 C_t = Constant(4.0)
@@ -95,8 +165,7 @@ Q_element = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
 W_element = MixedElement(V_element, Q_element) 
 W = FunctionSpace(mesh, W_element)#, constrained_domain=PeriodicBoundary())
 print(W.dim())
-
-physical_problem.define_bc(W, u_top)
+physical_problem.define_boundaries(W)
 subdomains = physical_problem.subdomains
 boundaries = physical_problem.boundaries
 bmesh      = physical_problem.bmesh
@@ -118,11 +187,6 @@ xdmf.write(boundaries)
 
 h = function.specialfunctions.CellDiameter(physical_problem.mesh)
 hmin = physical_problem.mesh.hmin()
-u_max = max(u_top.values())
-
-dt = CFL*hmin/u_max
-
-
 
 
 dg0_element = FiniteElement("DG", mesh.ufl_cell(),0)
@@ -559,6 +623,12 @@ up_bc = Function(W)
 (u_bc, _) = split(up_bc)
 u_bc = Constant((0.,0.))
 
+X_inner = generate_inner_products(W)
+
+nu = Constant(nu_val)
+
+u_top = Constant(u_top_val)
+
 # ## BCs for weak boundaries and initial condition perturbation
 # ## BCs for weak boundaries and initial condition perturbation
 # u_pert = Expression(('u_max*0.01*sin(25*x[1]*2*pi/delta_z)',\
@@ -573,12 +643,6 @@ u_bc = Constant((0.,0.))
 
 # p_0 = interpolate(p_in, W.sub(1).collapse())
 
-u_0, p_0 = physical_problem.get_IC()
-u_0 = project(u_0, W.sub(0).collapse())
-p_0 = project(p_0, W.sub(1).collapse())
-
-assign(up_prev , [u_0,p_0])
-assign(up , [u_0,p_0])
 u_t = (u - u_prev)/dT
 
 # Preparation of Variational forms.
@@ -652,156 +716,260 @@ J = derivative(F, up, delta_up)
 
 
 
-"""### Boundary conditions (for the solution)"""
-
-# walls_bc       = DirichletBC(W.sub(0), Constant((0., 0.)), boundaries, walls_ID )
-# #sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
-# #inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
-# #outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
-# onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
 
 
-if boundary_tag == "strong":
-    bc = physical_problem.bcs # [onePoint_bc, walls_bc] #, sides_bc
-else:
-    bc = physical_problem.bc_no_walls # [onePoint_bc]#, walls_bc] #, sides_bc
-
-snes_solver_parameters = {"nonlinear_solver": "snes",
-                        "snes_solver": {"linear_solver": "mumps",
-                                        "maximum_iterations": 20,
-                                        "report": True,
-                                        "error_on_nonconvergence": True}}
-
-problem = NonlinearVariationalProblem(F, up, bc, J)
-solver  = NonlinearVariationalSolver(problem)
-solver.parameters.update(snes_solver_parameters)
-
-outfile_u = File(out_folder+"/u.pvd")
-outfile_p = File(out_folder+"/p.pvd")
-if boundary_tag in ["spalding", "weak"]:
-    outfile_tau = File(out_folder+"/tau.pvd")
 
 
-outxdmf_u = XDMFFile(out_folder+"/u.xdmf")
-outxdmf_p = XDMFFile(out_folder+"/p.xdmf")
-if boundary_tag in ["spalding", "weak"]:
-    outxdmf_tau = XDMFFile(out_folder+"/tau.xdmf")
+def solve_FOM(param, folder_simulation):
+    try:
+        os.mkdir(folder_simulation)
+    except:
+        print("Probably folder %s already exists "%folder_simulation)
+    u_top_val = param[0]
+    nu_val = param[1]
+
+    nu.assign(Constant(nu_val))
+    u_top.assign(Constant(u_top_val))
+
+    Re_val = physical_problem.get_reynolds(u_top_val,nu_val)
+
+    print("Reynolds Number = %e"%Re_val)
+    physical_problem.define_bc(W, u_top)
 
 
-time=0.
-if boundary_tag=="weak":
-    trial_v0 = TrialFunction(V0)
-    tau_penalty_bound = Function(V0)
-    test_v0 = TrialFunction(V0)
-    F_tau = inner(tau_penalty_bound,test_v0)*dx - inner(test_v0,C_pen*nu/hb)*physical_problem.ds_bc
-    solve(F_tau==0,tau_penalty_bound )
-    # outfile_tau << tau_penalty_bound
-    outfile_tau.write_checkpoint(tau_penalty_bound, "tau", time, XDMFFile.Encoding.HDF5, False)
-    
 
-(u, p) = up.split()
-outfile_u << u
-outfile_p << p
+    """### Boundary conditions (for the solution)"""
 
-outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=False)
-outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=False)
+    # walls_bc       = DirichletBC(W.sub(0), Constant((0., 0.)), boundaries, walls_ID )
+    # #sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
+    # #inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
+    # #outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
+    # onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
 
 
-tic= time_module.time()
-
-
-it=0
-tplot=0.
-u_norm = interpolate(u_top,V0)
-while time < T and it < Nt_max:
-    tic_one_step= time_module.time()
-    if u_norm.vector().max()<1e-8:
-        dt=CFL*hmin
+    if boundary_tag == "strong":
+        bc = physical_problem.bcs # [onePoint_bc, walls_bc] #, sides_bc
     else:
-        dt = CFL*project(h/u_norm,V0).vector().min()
-    dT.assign(dt)
-    print("Maximum speed %g"%(u_norm.vector().max()))
-    print("Time %1.5e, final time = %1.5e, dt = %1.5e"%(time,T,dt))
-    # Compute the current time
-    # Update the time for the boundary condition
-    physical_problem.u_in.t = time
-    # Solve the nonlinear problem
-    # with pipes() as (out, err):
-    if boundary_tag =="spalding":
-        tic_spalding= time_module.time()
-        solve_spalding_law_inout(u_prev,hb,tau_penalty)
-        toc_spalding= time_module.time() - tic_spalding
-        print("Spalding time %e"%toc_spalding)
+        bc = physical_problem.bc_no_walls # [onePoint_bc]#, walls_bc] #, sides_bc
 
-    #solver.solve()
-    solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
-    # Store the solution in up_prev
-    assign(up_prev, up)
-    # Plot
+    snes_solver_parameters = {"nonlinear_solver": "snes",
+                            "snes_solver": {"linear_solver": "mumps",
+                                            "maximum_iterations": 20,
+                                            "report": True,
+                                            "error_on_nonconvergence": True}}
+
+    problem = NonlinearVariationalProblem(F, up, bc, J)
+    solver  = NonlinearVariationalSolver(problem)
+    solver.parameters.update(snes_solver_parameters)
+
+    u_max = max(u_top.values())
+
+    dt = CFL*hmin/u_max
+
+
+
+
+
+    u_0, p_0 = physical_problem.get_IC()
+    u_0 = project(u_0, W.sub(0).collapse())
+    p_0 = project(p_0, W.sub(1).collapse())
+
+    assign(up_prev , [u_0,p_0])
+    assign(up , [u_0,p_0])
+
+
+
+    outfile_u = File(folder_simulation+"/u.pvd")
+    outfile_p = File(folder_simulation+"/p.pvd")
+    if boundary_tag in ["spalding", "weak"]:
+        outfile_tau = File(folder_simulation+"/tau.pvd")
+
+
+    outxdmf_u = XDMFFile(folder_simulation+"/u.xdmf")
+    outxdmf_p = XDMFFile(folder_simulation+"/p.xdmf")
+    if boundary_tag in ["spalding", "weak"]:
+        outxdmf_tau = XDMFFile(folder_simulation+"/tau.xdmf")
+
+
+    time=0.
+    if boundary_tag=="weak":
+        trial_v0 = TrialFunction(V0)
+        tau_penalty_bound = Function(V0)
+        test_v0 = TrialFunction(V0)
+        F_tau = inner(tau_penalty_bound,test_v0)*dx - inner(test_v0,C_pen*nu/hb)*physical_problem.ds_bc
+        solve(F_tau==0,tau_penalty_bound )
+        # outfile_tau << tau_penalty_bound
+        outxdmf_tau.write_checkpoint(tau_penalty_bound, "tau", time, XDMFFile.Encoding.HDF5, False)
+        
+
     (u, p) = up.split()
+    outfile_u << u
+    outfile_p << p
 
-    u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
-
-    toc_one_step = time_module.time() - tic_one_step
-    print("Time one step %e"%(toc_one_step))
-    if boundary_tag=="spalding":
-        print("Percentage spalding %g%%"%(100.*toc_spalding/toc_one_step))
-    tplot+= dt
-    time+= dt
-    if tplot > dtplot:
-        print("time = %g"%time)
-        tplot = tplot - dtplot
-        outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=True)
-        outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=True)
-        if boundary_tag in ["spalding"]:
-            outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, append=True)
-
-        outfile_u << u
-        outfile_p << p
-        if boundary_tag in ["spalding"]:
-            outfile_tau << tau_penalty
-
-toc =  time_module.time()-tic
-print("computational time %g"%toc)
-
-with open(out_folder+"/computational_time.npy",'wb') as file:
-    np.save(file,toc)
+    outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=False)
+    outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=False)
 
 
-outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, True)
-outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, True)
-if boundary_tag in ["spalding"]:
-    outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, True)
-
-outfile_u << u
-outfile_p << p
-if boundary_tag in ["spalding"]:
-    outfile_tau << tau_penalty
-
-plt.figure()
-pp=plot(p); plt.colorbar(pp)
-plt.title("Pressure")
-plt.show(block=False)
-
-plt.figure()
-pp=plot(u[0]); plt.colorbar(pp)
-plt.title("u")
-plt.show(block=False)
-
-plt.figure()
-pp=plot(u[1]); plt.colorbar(pp)
-plt.title("v")
-plt.show(block=False)
+    tic= time_module.time()
 
 
-if boundary_tag in ["spalding"]:
-    plt.figure()
-    pp=plot(tau_penalty); plt.colorbar(pp)
-    plt.title("Tau penalty")
-    plt.show(block=False)
+    POD_time = dict()
+    for comp in ("u","p"):
+        POD_time[comp] = ProperOrthogonalDecomposition(W, X_inner[comp])
 
-plt.figure()
-pp=plot(u); plt.colorbar(pp)
-plt.title("Velocity")
-plt.show()
+    times = [time]
+    it=0
+    tplot=0.
+    u_norm = interpolate(u_top,V0)
+    while time < T and it < Nt_max:
+        tic_one_step= time_module.time()
+        if u_norm.vector().max()<1e-8:
+            dt=CFL*hmin
+        else:
+            dt = CFL*project(h/u_norm,V0).vector().min()
+        dt = min(dt, T-time)
+        dT.assign(dt)
+        print("Maximum speed %g"%(u_norm.vector().max()))
+        print("Time %1.5e, final time = %1.5e, dt = %1.5e"%(time,T,dt))
+        # Compute the current time
+        # Update the time for the boundary condition
+        physical_problem.u_in.t = time
+        # Solve the nonlinear problem
+        # with pipes() as (out, err):
+        if boundary_tag =="spalding":
+            tic_spalding= time_module.time()
+            solve_spalding_law_inout(u_prev,hb,tau_penalty)
+            toc_spalding= time_module.time() - tic_spalding
+            print("Spalding time %e"%toc_spalding)
 
+        #solver.solve()
+        solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
+        # Store the solution in up_prev
+        assign(up_prev, up)
+        # Plot
+        (u, p) = up.split()
+
+        u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
+
+        toc_one_step = time_module.time() - tic_one_step
+        print("Time one step %e"%(toc_one_step))
+        if boundary_tag=="spalding":
+            print("Percentage spalding %g%%"%(100.*toc_spalding/toc_one_step))
+        tplot+= dt
+        time+= dt
+        it+=1
+
+        times.append(time)
+
+        if it<10 or tplot > dtplot:
+            print("time = %g"%time)
+            tplot = 0.
+            outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=True)
+            outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=True)
+            if boundary_tag in ["spalding"]:
+                outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, append=True)
+
+            outfile_u << u
+            outfile_p << p
+            if boundary_tag in ["spalding"]:
+                outfile_tau << tau_penalty
+
+            for comp in ("u","p"):
+                POD_time[comp].store_snapshot(up)
+        
+    computational_time =  time_module.time()-tic
+    print("computational time %g"%computational_time)
+    times = np.array(times)
+
+    data_file = folder_simulation+"/data.npy"
+    np.savez(data_file, times, param, computational_time)
+
+    outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, True)
+    outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, True)
+    if boundary_tag in ["spalding"]:
+        outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, True)
+
+    outfile_u << u
+    outfile_p << p
+    if boundary_tag in ["spalding"]:
+        outfile_tau << tau_penalty
+
+    # for comp in ("u","p"):
+    #     POD_time[comp].store_snapshot(up)   
+
+    # plt.figure()
+    # pp=plot(p); plt.colorbar(pp)
+    # plt.title("Pressure")
+    # plt.show(block=False)
+
+    # plt.figure()
+    # pp=plot(u[0]); plt.colorbar(pp)
+    # plt.title("u")
+    # plt.show(block=False)
+
+    # plt.figure()
+    # pp=plot(u[1]); plt.colorbar(pp)
+    # plt.title("v")
+    # plt.show(block=False)
+
+
+    # if boundary_tag in ["spalding"]:
+    #     plt.figure()
+    #     pp=plot(tau_penalty); plt.colorbar(pp)
+    #     plt.title("Tau penalty")
+    #     plt.show(block=False)
+
+    # plt.figure()
+    # pp=plot(u); plt.colorbar(pp)
+    # plt.title("Velocity")
+    # plt.show(block=False)
+
+
+    # eigs = dict()
+    # Z_comp = dict()
+    # for comp in ("u","p"):
+    #     eigs[comp],_,Z_comp[comp], N = POD_time[comp].apply(40, tol=1e-15)
+
+    #     plt.figure()
+    #     plt.semilogy(eigs[comp])
+    #     plt.savefig(folder_simulation+"/POD_eigs_decay_%s.pdf"%comp)
+
+
+
+
+
+class Snapshots():
+    def __init__(self, param_range, N = 100, snap_folder = "FOM_snapshots" ):
+        self.training_set = Parameter(param_range)
+        self.training_set.generate_training_set( N )
+        self.snap_folder = snap_folder
+        try:      
+            os.mkdir(self.snap_folder)
+        except:
+            print("folder %s already exists"%self.snap_folder)
+        
+    def compute_snapshots(self):
+        for i in range(self.training_set.N_train):
+            param = self.training_set.training_set[i]
+            simul_folder = self.snap_folder+"/param_%03d"%i
+            solve_FOM(param, simul_folder)
+
+    # def read_snapshots(self):
+
+    #     param = self.training_set.training_set[0]
+    #     param_problem  = self.problem(param)
+    #     self.PODs = []
+    #     for i in range(param_problem.sys_dim):
+    #         self.PODs.append( ProperOrthogonalDecomposition(W, X) )
+                
+    #     for i in range(self.training_set.N_train):
+    #         param_problem  = self.problem(param)
+    #         simul_folder = self.snap_folder+"/n_%03d"%i
+    #         param_problem.compute_numerical_solution(V, mesh= mesh, folder =simul_folder, skip_if_computed=skip_simul_if_computed )
+    #         param_problem.load_all_solutions(self.PODs, simul_folder)
+
+
+# solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
+
+snapshots = Snapshots(param_range, N=20, snap_folder =out_folder)
+snapshots.compute_snapshots()
