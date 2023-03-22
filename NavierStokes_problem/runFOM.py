@@ -149,15 +149,22 @@ class Snapshots():
     #         param_problem.load_all_solutions(self.PODs, simul_folder)
 
 
-# solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
+#solve_FOM([u_top_val,nu_val], out_folder+"/param_trial", with_plot=True)
 
 snapshots = Snapshots(param_range, N=20, snap_folder =out_folder)
 snapshots.compute_snapshots()
 
-#snapshots.read_snapshots()
-#snapshots.compute_POD(N_POD = 40)
+# param = snapshots.training_set.training_set[0]
+# u_top_val = param[0]
+# nu_val = param[1]
 
-#solve_FOM([u_top_val,nu_val], out_folder+"/param_trial_RB_proj", \
-#          RB=snapshots.Z_comp, with_plot=True)
+# solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
+
+
+# snapshots.read_snapshots()
+# snapshots.compute_POD(N_POD = 30)
+
+# solve_FOM([u_top_val,nu_val], out_folder+"/param_trial_RB_proj", \
+#           RB=snapshots.Z_comp, with_plot=True)
 
 #stop()

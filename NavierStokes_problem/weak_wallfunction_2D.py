@@ -32,7 +32,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag =  "spalding" # "strong"#"spalding"# "spalding"# 
+boundary_tag =  "weak" # "strong"#"spalding"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -47,9 +47,6 @@ problem_name = "cylinder_turb"#"cylinder"#"lid-driven_cavity"
 CFL = 0.5
 Nt_max = 10000
 dT=Constant(1.e-5)
-
-
-
 
 
 
@@ -812,7 +809,7 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
         if boundary_tag in ["spalding"]:
             outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB.xdmf")
 
-        (u_hat, p_hat) = up_hat.split()
+        (u_hat, p_hat) = up_hat.split(deepcopy=True)
         outfile_uRB << u_hat
         outfile_pRB << p_hat
 
@@ -834,7 +831,7 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
         outxdmf_tau.write_checkpoint(tau_penalty_bound, "tau", time, XDMFFile.Encoding.HDF5, False)
         
 
-    (u, p) = up.split()
+    (u, p) = up.split(deepcopy=True)
     outfile_u << u
     outfile_p << p
 
@@ -906,10 +903,19 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
             times_plot.append(time)
             print("time = %g"%time)
             tplot = 0.
-            outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=True)
-            outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=True)
+
+            (u_deep, p_deep) = up.split(deepcopy=True)
+
+            outxdmf_u.write_checkpoint(u_deep, "u", time, XDMFFile.Encoding.HDF5, append=True)
+            outxdmf_p.write_checkpoint(p_deep, "p", time, XDMFFile.Encoding.HDF5, append=True)
             if boundary_tag in ["spalding"]:
                 outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, append=True)
+
+            up_tmp = Function(W)
+            (u_tmp, p_tmp) = up_tmp.split(deepcopy=True)
+            outxdmf_u.read_checkpoint(u_tmp, "u", 1)
+            outxdmf_p.read_checkpoint(p_tmp, "p", 1)
+            assign(up_tmp, [u_tmp,p_tmp])
 
             outfile_u << u
             outfile_p << p
@@ -924,8 +930,9 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
                     up_RB = project_onto_RB(RB, up)
                     tau_hat = None
                 reconstruct_RB(RB, up_RB, up_hat, tau_hat )
-                outxdmf_uRB.write_checkpoint(u_hat, "u", time, XDMFFile.Encoding.HDF5, append=True)
-                outxdmf_pRB.write_checkpoint(p_hat, "p", time, XDMFFile.Encoding.HDF5, append=True)
+                (u_hat_deep, p_hat_deep) = up_hat.split(deepcopy=True) 
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", time, XDMFFile.Encoding.HDF5, append=True)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", time, XDMFFile.Encoding.HDF5, append=True)
                 if boundary_tag in ["spalding"]:
                     outxdmf_tauRB.write_checkpoint(tau_hat, "tau", time, XDMFFile.Encoding.HDF5, append=True)
 
@@ -951,13 +958,14 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
     print("computational time %g"%computational_time)
     times = np.array(times)
 
-    data_file = folder_simulation+"/data.npy"
+    data_file = folder_simulation+"/data.npz"
     np.savez(data_file, times, param, computational_time)
 
 
     times_plot.append(time)
-    outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, True)
-    outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, True)
+    (u_deep, p_deep) = up.split(deepcopy=True)
+    outxdmf_u.write_checkpoint(u_deep, "u", time, XDMFFile.Encoding.HDF5, True)
+    outxdmf_p.write_checkpoint(p_deep, "p", time, XDMFFile.Encoding.HDF5, True)
     if boundary_tag in ["spalding"]:
         outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, True)
 
@@ -974,8 +982,9 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
             up_RB = project_onto_RB(RB, up)
             tau_hat = None
         reconstruct_RB(RB, up_RB, up_hat, tau_hat )
-        outxdmf_uRB.write_checkpoint(u_hat, "u", time, XDMFFile.Encoding.HDF5, append=True)
-        outxdmf_pRB.write_checkpoint(p_hat, "p", time, XDMFFile.Encoding.HDF5, append=True)
+        (u_hat_deep, p_hat_deep) = up_hat.split(deepcopy=True) 
+        outxdmf_uRB.write_checkpoint(u_hat_deep, "u", time, XDMFFile.Encoding.HDF5, append=True)
+        outxdmf_pRB.write_checkpoint(p_hat_deep, "p", time, XDMFFile.Encoding.HDF5, append=True)
         if boundary_tag in ["spalding"]:
             outxdmf_tauRB.write_checkpoint(tau_hat, "tau", time, XDMFFile.Encoding.HDF5, append=True)
 
@@ -1091,172 +1100,240 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
             plt.savefig(folder_simulation+"/errors_vs_time.pdf")
             plt.show(block=False)
 
-def compute_FOM_RB_projection(RB, param, folder_simulation):
+
+
+
+
+
+def read_FOM_and_project(folder_simulation, RB, with_plot = False):
     try:
         os.mkdir(folder_simulation)
     except:
         print("Probably folder %s already exists "%folder_simulation)
+    
+    data_file = folder_simulation+"/data.npz"
+    data_struct = np.load(data_file)
+    times = data_struct['arr_0']
+    param = data_struct['arr_1']
+    computational_time = data_struct['arr_2'] 
+
     u_top_val = param[0]
     nu_val = param[1]
 
-    nu.assign(Constant(nu_val))
-    u_top.assign(Constant(u_top_val))
+    W_u =FunctionSpace(mesh,V_element)
+    W_p =FunctionSpace(mesh,Q_element)
+     
 
-    Re_val = physical_problem.get_reynolds(u_top_val,nu_val)
-
-    print("Reynolds Number = %e"%Re_val)
-    physical_problem.define_bc(W, u_top)
-
-
-
-    """### Boundary conditions (for the solution)"""
-
-    # walls_bc       = DirichletBC(W.sub(0), Constant((0., 0.)), boundaries, walls_ID )
-    # #sides_bc       = DirichletBC(W.sub(0).sub(1), Constant(0.), boundaries, sides_ID )
-    # #inlet_bc       = DirichletBC(W.sub(1), Constant(0.),       boundaries, inlet_ID )
-    # #outlet_bc       = DirichletBC(W.sub(1), Constant(0.),      boundaries, outlet_ID )
-    # onePoint_bc     = DirichletBC(W.sub(1), Constant(0.),      boundaries, onePoint_ID) #OnePoint(), method='pointwise')# 
-
-
-    if boundary_tag == "strong":
-        bc = physical_problem.bcs # [onePoint_bc, walls_bc] #, sides_bc
-    else:
-        bc = physical_problem.bc_no_walls # [onePoint_bc]#, walls_bc] #, sides_bc
-
-    snes_solver_parameters = {"nonlinear_solver": "snes",
-                            "snes_solver": {"linear_solver": "mumps",
-                                            "maximum_iterations": 20,
-                                            "report": True,
-                                            "error_on_nonconvergence": True}}
-
-    problem = NonlinearVariationalProblem(F, up, bc, J)
-    solver  = NonlinearVariationalSolver(problem)
-    solver.parameters.update(snes_solver_parameters)
-
-    u_max = max(u_top.values())
-
-    dt = CFL*hmin/u_max
-
-
-
-
-
-    u_0, p_0 = physical_problem.get_IC()
-    u_0 = project(u_0, W.sub(0).collapse())
-    p_0 = project(p_0, W.sub(1).collapse())
-
-    assign(up_prev , [u_0,p_0])
-    assign(up , [u_0,p_0])
-
-
-
-    outfile_u = File(folder_simulation+"/u.pvd")
-    outfile_p = File(folder_simulation+"/p.pvd")
+    filexdmf_u  = XDMFFile(folder_simulation+"/u.xdmf")
+    filexdmf_p  = XDMFFile(folder_simulation+"/p.xdmf")
     if boundary_tag in ["spalding", "weak"]:
-        outfile_tau = File(folder_simulation+"/tau.pvd")
+        filexdmf_tau  = XDMFFile(folder_simulation+"/tau.xdmf")
+
+    
+    up_hat = Function(W)
 
 
-    outxdmf_u = XDMFFile(folder_simulation+"/u.xdmf")
-    outxdmf_p = XDMFFile(folder_simulation+"/p.xdmf")
-    if boundary_tag in ["spalding", "weak"]:
-        outxdmf_tau = XDMFFile(folder_simulation+"/tau.xdmf")
+    outfile_uRB = File(folder_simulation+"/uRB.pvd")
+    outfile_pRB = File(folder_simulation+"/pRB.pvd")
+    if boundary_tag in ["spalding"]:
+        outfile_tauRB = File(folder_simulation+"/tauRB.pvd")
 
 
-    time=0.
-    if boundary_tag=="weak":
-        trial_v0 = TrialFunction(V0)
-        tau_penalty_bound = Function(V0)
-        test_v0 = TrialFunction(V0)
-        F_tau = inner(tau_penalty_bound,test_v0)*dx - inner(test_v0,C_pen*nu/hb)*physical_problem.ds_bc
-        solve(F_tau==0,tau_penalty_bound )
-        # outfile_tau << tau_penalty_bound
-        outxdmf_tau.write_checkpoint(tau_penalty_bound, "tau", time, XDMFFile.Encoding.HDF5, False)
-        
+    outxdmf_uRB = XDMFFile(folder_simulation+"/uRB.xdmf")
+    outxdmf_pRB = XDMFFile(folder_simulation+"/pRB.xdmf")
+    if boundary_tag in ["spalding"]:
+        outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB.xdmf")
 
-    (u, p) = up.split()
-    outfile_u << u
-    outfile_p << p
+    (u_hat, p_hat) = up_hat.split()
 
-    outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=False)
-    outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=False)
+    RB_coef = dict()
+    errors = dict()
 
+    err = Function(W)
+
+    components = ["u","p"]
+    if boundary_tag=="spalding":
+        components.append("tau")
+    
+    for comp in components:
+        RB_coef[comp]=[]
+        errors[comp]=[]
+
+    # PROJECTING ONTO RB
+    foundSolution = True
+    i=0
+    while foundSolution:
+        try:
+            (u_tmp, p_tmp) = up.split(deepcopy=True)
+            filexdmf_u.read_checkpoint(u_tmp,"u",i)
+            filexdmf_p.read_checkpoint(p_tmp,"p",i)
+
+            print("after reading")
+
+            assign(up, [u_tmp, p_tmp])
+            if boundary_tag=="spalding":
+                filexdmf_u.read_checkpoint(tau_penalty,"tau",i)
+
+            if boundary_tag=="spalding":
+                up_RB = project_onto_RB(RB, up, tau_penalty)
+                tau_hat = Function(V0)
+            else:
+                up_RB = project_onto_RB(RB, up)
+                tau_hat = None
+
+            for comp in components:
+                RB_coef[comp].append(up_RB[comp])
+            
+
+            reconstruct_RB(RB, up_RB, up_hat, tau_hat )
+            (u_hat_deep, p_hat_deep) = up_hat.split(deepcopy=True)
+            
+            print("after reconstruction")
+
+            outfile_uRB << u_hat
+            outfile_pRB << p_hat
+
+            if i==0:    
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", i, XDMFFile.Encoding.HDF5, append=False)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", i, XDMFFile.Encoding.HDF5, append=False)
+            else:
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", i, XDMFFile.Encoding.HDF5, append=True)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", i, XDMFFile.Encoding.HDF5, append=True)
+
+            if boundary_tag in ["spalding"]:
+                outxdmf_tauRB.write_checkpoint(tau_hat, "tau", time, XDMFFile.Encoding.HDF5, append=False) 
+
+            # Computing errors
+            print("before error")
+
+            err.assign(up-up_hat)
+            for comp in ("u","p"):
+                errors[comp].append(\
+                    (X_inner[comp]*err.vector()).inner(err.vector())/\
+                    ((X_inner[comp]*up.vector()).inner(up.vector())+1e-100)) 
+            if boundary_tag=="spalding":
+                comp= "tau"
+                tau_err.assign(tau_penalty-tau_hat)
+                errors["tau"].append(\
+                    (X_inner[comp]*tau_err.vector()).inner(tau_err.vector())/\
+                    ((X_inner[comp]*tau_penalty.vector()).inner(tau_penalty.vector())+1e-100))
+
+            i+=1
+            print("Read step ",i)
+        except:
+            foundSolution =False
+
+    for comp in components:
+        RB_coef[comp]=np.array(RB_coef[comp])
 
     tic= time_module.time()
 
+
     times = [time]
-    it=0
-    tplot=0.
-    u_norm = interpolate(u_top,V0)
-    while time < T and it < Nt_max:
-        tic_one_step= time_module.time()
-        if u_norm.vector().max()<1e-8:
-            dt=CFL*hmin
-        else:
-            dt = CFL*project(h/u_norm,V0).vector().min()
-        dt = min(dt, T-time)
-        dT.assign(dt)
-        print("Maximum speed %g"%(u_norm.vector().max()))
-        print("Time %1.5e, final time = %1.5e, dt = %1.5e"%(time,T,dt))
-        # Compute the current time
-        # Update the time for the boundary condition
-        physical_problem.u_in.t = time
-        # Solve the nonlinear problem
-        # with pipes() as (out, err):
-        if boundary_tag =="spalding":
-            tic_spalding= time_module.time()
-            solve_spalding_law_inout(u_prev,hb,tau_penalty)
-            toc_spalding= time_module.time() - tic_spalding
-            print("Spalding time %e"%toc_spalding)
-
-        #solver.solve()
-        solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
-        # Store the solution in up_prev
-        assign(up_prev, up)
-        # Plot
-        (u, p) = up.split()
-
-        u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
-
-        ## Project solution onto RB
-
-
-        toc_one_step = time_module.time() - tic_one_step
-        print("Time one step %e"%(toc_one_step))
+    times_plot = [time]
+    if RB is not None:
+        errors = dict()
+        err = Function(W)
+        err.assign(up-up_hat)
+        for comp in ("u","p"):
+            errors[comp] = [ (X_inner[comp]*err.vector()).inner(err.vector()) ]
         if boundary_tag=="spalding":
-            print("Percentage spalding %g%%"%(100.*toc_spalding/toc_one_step))
-        tplot+= dt
-        time+= dt
-        it+=1
+            comp= "tau"
+            tau_err = Function(V0)
+            tau_err.assign(tau_penalty-tau_hat)
+            errors["tau"] = [ (X_inner[comp]*tau_err.vector()).inner(tau_err.vector())]
+    
 
-        times.append(time)
+    for i in range(len(snapshots.POD["u"].snapshot_matrix)):
+        plot(snapshots.POD["u"].snapshot_matrix[i])
 
-        if it<10 or tplot > dtplot:
-            print("time = %g"%time)
-            tplot = 0.
-            outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, append=True)
-            outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, append=True)
+    if with_plot:
+        plt.figure()
+        pp=plot(p); plt.colorbar(pp)
+        plt.title("Pressure")
+        plt.savefig(folder_simulation+"/p_final.png")
+        plt.show(block=False)
+
+        plt.figure()
+        pp=plot(u); plt.colorbar(pp)
+        plt.title("Velocity")
+        plt.savefig(folder_simulation+"/u_final.png")
+        plt.show(block=False)
+
+        plt.figure()
+        pp=plot(u[0]); plt.colorbar(pp)
+        plt.title("u")
+        plt.show(block=False)
+
+        plt.figure()
+        pp=plot(u[1]); plt.colorbar(pp)
+        plt.title("v")
+        plt.show(block=False)
+
+
+        if boundary_tag in ["spalding"]:
+            plt.figure()
+            pp=plot(tau_penalty); plt.colorbar(pp)
+            plt.title("Tau penalty")
+            plt.savefig(folder_simulation+"/tau_final.png")
+            plt.show(block=False)
+
+        if RB is not None:
+            plt.figure()
+            pp=plot(u_hat); plt.colorbar(pp)
+            plt.title("Velocity")
+            plt.savefig(folder_simulation+"/u_RB_proj_final.png")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(p_hat); plt.colorbar(pp)
+            plt.title("Pressure")
+            plt.savefig(folder_simulation+"/p_RB_proj_final.png")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(u_hat[0]); plt.colorbar(pp)
+            plt.title("uRB")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(u_hat[1]); plt.colorbar(pp)
+            plt.title("vRB")
+            plt.show(block=False)
+
+
             if boundary_tag in ["spalding"]:
-                outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, append=True)
+                plt.figure()
+                pp=plot(tau_hat); plt.colorbar(pp)
+                plt.title("Tau penalty")
+                plt.savefig(folder_simulation+"/tau_RB_proj_final.png")
+                plt.show(block=False)
 
-            outfile_u << u
-            outfile_p << p
+            plt.figure()
+            pp=plot(err.sub(0)); plt.colorbar(pp)
+            plt.title("Velocity")
+            plt.savefig(folder_simulation+"/err_u_RB_proj_final.png")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(err.sub(1)); plt.colorbar(pp)
+            plt.title("Pressure")
+            plt.savefig(folder_simulation+"/err_p_RB_proj_final.png")
+            plt.show(block=False)
+
+
             if boundary_tag in ["spalding"]:
-                outfile_tau << tau_penalty
+                plt.figure()
+                pp=plot(tau_err); plt.colorbar(pp)
+                plt.title("Tau penalty error")
+                plt.savefig(folder_simulation+"/err_tau_RB_proj_final.png")
+                plt.show(block=False)
 
-        
-    computational_time =  time_module.time()-tic
-    print("computational time %g"%computational_time)
-    times = np.array(times)
+            plt.figure()
+            plt.plot(times_plot, errors["u"], label="error u")
+            plt.plot(times_plot, errors["p"], label="error p")
+            if boundary_tag in ["spalding"]:
+                plt.plot(times_plot, errors["tau"], label="error tau")
+            plt.savefig(folder_simulation+"/errors_vs_time.pdf")
+            plt.show(block=False)
 
-    data_file = folder_simulation+"/data.npy"
-    np.savez(data_file, times, param, computational_time)
-
-    outxdmf_u.write_checkpoint(u, "u", time, XDMFFile.Encoding.HDF5, True)
-    outxdmf_p.write_checkpoint(p, "p", time, XDMFFile.Encoding.HDF5, True)
-    if boundary_tag in ["spalding"]:
-        outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, True)
-
-    outfile_u << u
-    outfile_p << p
-    if boundary_tag in ["spalding"]:
-        outfile_tau << tau_penalty
