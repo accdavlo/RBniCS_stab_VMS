@@ -32,7 +32,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag =  "weak" # "strong"#"spalding"# "spalding"# 
+boundary_tag =  "spalding"#"weak" # "strong"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -42,7 +42,7 @@ degree = 2
 
 
 Nx = 100
-problem_name = "cylinder_turb"#"cylinder"#"lid-driven_cavity"
+problem_name = "cylinder"#"cylinder_turb"#"lid-driven_cavity"
 
 CFL = 0.5
 Nt_max = 10000
@@ -680,6 +680,8 @@ if giovanni:
     if boundary_tag=="weak":
         F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, spalding=False, C_pen = C_b_I)
     elif boundary_tag=="spalding":
+        F_weak = F +weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, spalding=False, C_pen = C_b_I)
+        J_weak = derivative(F_weak, up, delta_up)
         F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, spalding=True)
 else:
     #Hughes' version
@@ -704,8 +706,9 @@ else:
     if boundary_tag=="weak":
         F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, G=G, spalding=False, C_pen = C_b_I)
     elif boundary_tag=="spalding":
+        F_weak = F +weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, G=G, spalding=False, C_pen = C_b_I)
         F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, G=G, spalding=True)
-
+        J_weak = derivative(F_weak, up, delta_up)
 
 
 
@@ -856,6 +859,28 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
             tau_err.assign(tau_penalty-tau_hat)
             errors["tau"] = [ (X_inner[comp]*tau_err.vector()).inner(tau_err.vector())]
     
+    u_norm = interpolate(u_top,V0)
+    if boundary_tag=="spalding":
+        # do one step of weak to compute a decent tau_penalty
+        if u_norm.vector().max()<1e-8:
+            dt=CFL*hmin
+        else:
+            dt = CFL*project(h/u_norm,V0).vector().min()
+        dt = min(dt, T-time)
+        dT.assign(dt)
+        print("Maximum speed %g"%(u_norm.vector().max()))
+        print("Time %1.5e, final time = %1.5e, dt = %1.5e"%(time,T,dt))
+        # Compute the current time
+        # Update the time for the boundary condition
+        physical_problem.u_in.t = time
+        #solver.solve()
+        # up_tmp = Function(W)
+        solve(F_weak == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
+        # Store the solution in up_prev
+        # Plot
+        #(u_tmp, p_tmp) = up_tmp.split()
+        solve_spalding_law_inout(up.sub(0),hb,tau_penalty)
+
     it=0
     tplot=0.
     u_norm = interpolate(u_top,V0)
@@ -873,19 +898,21 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
         # Update the time for the boundary condition
         physical_problem.u_in.t = time
         # Solve the nonlinear problem
-        # with pipes() as (out, err):
+
+        #solver.solve()
+        solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
+
+        # Store the solution in up_prev
+        assign(up_prev, up)
+        # Plot
+        (u, p) = up.split()
+
+        # For spalding law, computing tau_penalty
         if boundary_tag =="spalding":
             tic_spalding= time_module.time()
             solve_spalding_law_inout(u_prev,hb,tau_penalty)
             toc_spalding= time_module.time() - tic_spalding
             print("Spalding time %e"%toc_spalding)
-
-        #solver.solve()
-        solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
-        # Store the solution in up_prev
-        assign(up_prev, up)
-        # Plot
-        (u, p) = up.split()
 
         u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
 
