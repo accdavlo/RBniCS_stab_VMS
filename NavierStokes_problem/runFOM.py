@@ -1,5 +1,5 @@
 from weak_wallfunction_2D import *
-
+import rbnics 
 import random
 random.seed(a=5)
 
@@ -107,25 +107,88 @@ class Snapshots():
                 i+=1
 
     def compute_POD(self, N_POD = 100, tol = 1e-15):
+        self.POD_folder = self.snap_folder+"/POD"
+        try: 
+            os.mkdir(self.POD_folder)
+        except:
+            print("POD folder already exists")
         self.eigs = dict()
         self.Z_comp = dict()
-        for comp in ("u","p"):
+        for ic, comp in enumerate(("u","p")):
             print("Computing the POD for component %s"%comp)
             self.eigs[comp],_,self.Z_comp[comp], N = self.POD[comp].apply(N_POD, tol=tol)
-            # self.Z_comp[comp].save(self.snap_folder,"RB_"+comp)
+            #save bases
+            outxdmf_RB = XDMFFile(self.POD_folder+"/POD_basis_%s.xdmf"%comp)
+            for ib, basis in enumerate(self.Z_comp[comp]):
+                basis_components = basis.split(deepcopy=True)
+                if ib == 0:
+                    outxdmf_RB.write_checkpoint(basis_components[ic], comp, ib, XDMFFile.Encoding.HDF5, append=False)
+                else:
+                    outxdmf_RB.write_checkpoint(basis_components[ic], comp, ib, XDMFFile.Encoding.HDF5, append=True)
+            np.save(self.POD_folder+"/eigs_"+comp+".npy",self.eigs[comp])
+
             plt.figure()
             plt.semilogy(self.eigs[comp])
-            plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
+            plt.savefig(self.POD_folder+"/eigs_"+comp+".pdf")
             plt.close('all')
+
 
         if boundary_tag in ["spalding"]:
             print("Computing the POD for component %s"%comp)
             comp="tau"
             self.eigs[comp],_,self.Z_comp[comp], N = self.POD[comp].apply(N_POD, tol=tol)
+            #save bases
+            outxdmf_RB = XDMFFile(self.POD_folder+"/POD_basis_%s.xdmf"%comp)
+            for ib, basis in enumerate(self.Z_comp[comp]):
+                if ib == 0:
+                    outxdmf_RB.write_checkpoint(basis, comp, ib, XDMFFile.Encoding.HDF5, append=False)
+                else:
+                    outxdmf_RB.write_checkpoint(basis, comp, ib, XDMFFile.Encoding.HDF5, append=True)
+            np.save(self.POD_folder+"/eigs_"+comp+".npy",self.eigs[comp])
+        
+            plt.figure()
+            plt.semilogy(self.eigs[comp])
+            plt.savefig(self.POD_folder+"/eigs_"+comp+".pdf")
+            plt.close('all')
+
+    def load_RB(self):
+        self.POD_folder = self.snap_folder+"/POD"
+        self.eigs = dict()
+        self.Z_comp = dict()
+        self.N_POD = dict()
+        for ic, comp in enumerate(("u","p")):
+            print("Read the POD bases for component %s"%comp)
+            self.eigs[comp]=np.load(self.POD_folder+"/eigs_"+comp+".npy")
+            self.N_POD[comp] = len(self.eigs[comp])
+            self.Z_comp[comp] = rbnics.backends.dolfin.functions_list.FunctionsList(W)
+            outxdmf_RB = XDMFFile(self.snap_folder+"/POD_basis_%s.xdmf"%comp)
+            for i in range(self.N_POD[comp]):
+                up_tmp = up.split(deepcopy=True)
+                outxdmf_RB.read_checkpoint(up_tmp[ic],comp,i)
+                assign(up, [up_tmp[0],up_tmp[1]])
+                self.Z_comp[comp].enrich(up)
+        
             plt.figure()
             plt.semilogy(self.eigs[comp])
             plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
             plt.close('all')
+
+
+        if boundary_tag in ["spalding"]:
+            print("Read the POD bases for component %s"%comp)
+            self.eigs[comp]=np.load(self.POD_folder+"/eigs_"+comp+".npy")
+            self.N_POD[comp] = len(self.eigs[comp])
+            self.Z_comp[comp] = rbnics.backends.dolfin.functions_list.FunctionsList(V0)
+            outxdmf_RB = XDMFFile(self.snap_folder+"/POD_basis_%s.xdmf"%comp)
+            for ib, basis in enumerate(self.Z_comp[comp]):
+                outxdmf_RB.read_checkpoint(tau_penalty,comp,i)
+                self.Z_comp[comp].enrich(tau_penalty)
+
+            plt.figure()
+            plt.semilogy(self.eigs[comp])
+            plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
+            plt.close('all')
+
 
         # with open(self.snap_folder+"/RB_basis.pickle", "wb") as ff:
         #     pickle.dump([self.eigs, self.Z_comp], ff)
@@ -149,20 +212,25 @@ class Snapshots():
     #         param_problem.load_all_solutions(self.PODs, simul_folder)
 
 
+#u_top_val = 5.1
+#nu_val = 1e-3
+
 #solve_FOM([u_top_val,nu_val], out_folder+"/param_trial", with_plot=True)
 
 snapshots = Snapshots(param_range, N=20, snap_folder =out_folder)
 snapshots.compute_snapshots()
 
-# param = snapshots.training_set.training_set[0]
-# u_top_val = param[0]
-# nu_val = param[1]
+#param = snapshots.training_set.training_set[0]
+#u_top_val = param[0]
+#nu_val = param[1]
 
-# solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
+#solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
 
 
-# snapshots.read_snapshots()
-# snapshots.compute_POD(N_POD = 30)
+#snapshots.read_snapshots()
+#snapshots.compute_POD(N_POD = 30)
+
+# snapshots.load_RB()
 
 # solve_FOM([u_top_val,nu_val], out_folder+"/param_trial_RB_proj", \
 #           RB=snapshots.Z_comp, with_plot=True)

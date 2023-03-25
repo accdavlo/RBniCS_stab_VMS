@@ -32,7 +32,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag =  "spalding"#"weak" # "strong"# "spalding"# 
+boundary_tag = "spalding"#"weak" # "weak" # "strong"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -68,7 +68,7 @@ elif problem_name=="cylinder":
     u_top_val = 1. #1.  #100.  # 500
 
     param_range = [ [0.5,5.0],# u_in
-                [0.0002,0.005] # nu
+                [0.0002,0.001] # nu
                 ]
 
 
@@ -682,7 +682,8 @@ if giovanni:
     elif boundary_tag=="spalding":
         F_weak = F +weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, spalding=False, C_pen = C_b_I)
         J_weak = derivative(F_weak, up, delta_up)
-        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,physical_problem.ds_bc, tau_penalty, spalding=True)
+        F += weakDirichletBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds = physical_problem.ds_bc,\
+                              tau_pen = tau_penalty, spalding=True)
 else:
     #Hughes' version
     r_M, r_C = strongResidual(u,p,nu,u_t,f)
@@ -727,6 +728,9 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
         print("Probably folder %s already exists "%folder_simulation)
     u_top_val = param[0]
     nu_val = param[1]
+
+    print("u_top_val ", u_top_val)
+    print("nu_val ", nu_val)
 
     nu.assign(Constant(nu_val))
     u_top.assign(Constant(u_top_val))
@@ -1070,24 +1074,24 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
 
         if RB is not None:
             plt.figure()
-            pp=plot(u_hat); plt.colorbar(pp)
+            pp=plot(up_hat.sub(0)); plt.colorbar(pp)
             plt.title("Velocity")
             plt.savefig(folder_simulation+"/u_RB_proj_final.png")
             plt.show(block=False)
 
             plt.figure()
-            pp=plot(p_hat); plt.colorbar(pp)
+            pp=plot(up_hat.sub(1)); plt.colorbar(pp)
             plt.title("Pressure")
             plt.savefig(folder_simulation+"/p_RB_proj_final.png")
             plt.show(block=False)
 
             plt.figure()
-            pp=plot(u_hat[0]); plt.colorbar(pp)
+            pp=plot(up_hat.sub(0)[0]); plt.colorbar(pp)
             plt.title("uRB")
             plt.show(block=False)
 
             plt.figure()
-            pp=plot(u_hat[1]); plt.colorbar(pp)
+            pp=plot(up_hat.sub(0)[1]); plt.colorbar(pp)
             plt.title("vRB")
             plt.show(block=False)
 
@@ -1120,10 +1124,13 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
                 plt.show(block=False)
 
             plt.figure()
-            plt.plot(times_plot, errors["u"], label="error u")
-            plt.plot(times_plot, errors["p"], label="error p")
+            plt.semilogy(times_plot[1:], errors["u"][1:], label="error u")
+            plt.semilogy(times_plot[1:], errors["p"][1:], label="error p")
             if boundary_tag in ["spalding"]:
-                plt.plot(times_plot, errors["tau"], label="error tau")
+                plt.semilogy(times_plot, errors["tau"], label="error tau")
+            plt.legend()
+            plt.ylabel("Error")
+            plt.xlabel("Time")
             plt.savefig(folder_simulation+"/errors_vs_time.pdf")
             plt.show(block=False)
 
@@ -1131,7 +1138,7 @@ def solve_FOM(param, folder_simulation, RB = None, with_plot = False):
 
 
 
-
+## continue here
 def read_FOM_and_project(folder_simulation, RB, with_plot = False):
     try:
         os.mkdir(folder_simulation)
