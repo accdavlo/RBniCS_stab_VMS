@@ -38,10 +38,11 @@ param_set = Parameter(param_range)
 
 
 class Snapshots():
-    def __init__(self, param_range, N = 100, snap_folder = "FOM_snapshots" ):
+    def __init__(self, param_range, N = 100, snap_folder = "FOM_snapshots", with_lifting = False ):
         self.training_set = Parameter(param_range)
         self.training_set.generate_training_set( N )
         self.snap_folder = snap_folder
+        self.with_lifting = with_lifting
         try:      
             os.mkdir(self.snap_folder)
         except:
@@ -74,15 +75,56 @@ class Snapshots():
             tmp[comp] = Function(Spaces[comp])
 
         up = Function(W)
+        
+        i=0
+        param = self.training_set.training_set[0]
+        simul_folder = self.snap_folder+"/param_%03d"%i
+
+
+        print("Reading %s"%(simul_folder))
+        print("for parameter ",param)
+            
+        inp_xdmf = dict()
+        for comp in ("u","p"):
+            inp_xdmf[comp] = XDMFFile(simul_folder+"/%s.xdmf"%comp)
+        if boundary_tag in ["spalding"]:
+            comp = "tau"
+            inp_xdmf[comp] = XDMFFile(simul_folder+"/%s.xdmf"%comp)
+        
+        lift_xdmf = dict()
+        for comp in ("u","p"):
+            lift_xdmf[comp] = XDMFFile(self.snap_folder+"/lift_%s.xdmf"%comp)
+
+            
+            
+        self.lift = Function(W)
+        if self.with_lifting:
+            it=100
+            reading=True
+            while reading:
+                try:
+                    inp_xdmf["u"].read_checkpoint(tmp["u"],"u",it)
+                    lift_factor = get_lifting_factor(param)
+                    assign(self.lift,[tmp["u"],tmp["p"]])
+                    self.lift.assign(1./lift_factor*self.lift)
+                    (u_lift, p_lift) = self.lift.split(deepcopy=True)
+                    lift_xdmf["u"].write_checkpoint(u_lift, "u", 0, XDMFFile.Encoding.HDF5, append=False)
+                    lift_xdmf["p"].write_checkpoint(p_lift, "p", 0, XDMFFile.Encoding.HDF5, append=False)
+                    reading = False
+                except:
+                    it-=1
+                if it==1:
+                    print(f"no solution found for parameter {i}")
+                    break
+
+        up_lift = Function(W)
         for i in range(self.training_set.N_train):
+            it=1
             param = self.training_set.training_set[i]
             simul_folder = self.snap_folder+"/param_%03d"%i
-
-
             print("Reading %s"%(simul_folder))
             print("for parameter ",param)
-            
-
+                
             inp_xdmf = dict()
             for comp in ("u","p"):
                 inp_xdmf[comp] = XDMFFile(simul_folder+"/%s.xdmf"%comp)
@@ -90,21 +132,22 @@ class Snapshots():
                 comp = "tau"
                 inp_xdmf[comp] = XDMFFile(simul_folder+"/%s.xdmf"%comp)
 
-            i=0
             reading=True
+            param = self.training_set.training_set[i]
             while reading:
                 try:
                     for comp in ("u","p"):
-                        inp_xdmf[comp].read_checkpoint(tmp[comp],comp,i)
+                        inp_xdmf[comp].read_checkpoint(tmp[comp],comp,it)
                     assign(up,[tmp["u"],tmp["p"]])
                     for comp in ("u","p"):
-                        self.POD[comp].store_snapshot(up)
+                        up_lift.assign(self.lift * get_lifting_factor(param))
+                        self.POD[comp].store_snapshot(up-up_lift)
                     if boundary_tag=="spalding":
                         self.POD["tau"].store_snapshot(tmp["tau"])
                 except:
                     reading = False
-                    print("Time %d does not exists of solution %s"%(i,simul_folder))
-                i+=1
+                    print("Time %d does not exists of solution %s"%(it,simul_folder))
+                it+=1
 
     def compute_POD(self, N_POD = 100, tol = 1e-15):
         self.POD_folder = self.snap_folder+"/POD"
@@ -150,8 +193,24 @@ class Snapshots():
             plt.semilogy(self.eigs[comp])
             plt.savefig(self.POD_folder+"/eigs_"+comp+".pdf")
             plt.close('all')
+        
+        # convert RB into matrix
+        self.RB_mat = BasisFunctionsMatrix(W)
+        self.RB_mat.init(["u","p"])
+        self.RB_mat.enrich(self.Z_comp["u"],component="u")
+        self.RB_mat.enrich(self.Z_comp["p"],component="p")
+        self.RB_mat.save(self.POD_folder, "POD_up")
 
-    def load_RB(self):
+        if boundary_tag =="spalding":
+            self.RB_mat_tau = BasisFunctionsMatrix(V0)
+            self.RB_mat_tau.init(["tau"])
+            self.RB_mat_tau.enrich(self.Z_comp["tau"],component="tau")
+            self.RB_mat.save(self.POD_folder, "POD_tau")
+
+    def load_RB(self, NPOD_max = None):
+        """NPOD_max is a list of maximum mode we want to
+        retain for each component
+        """
         self.POD_folder = self.snap_folder+"/POD"
         self.eigs = dict()
         self.Z_comp = dict()
@@ -160,8 +219,10 @@ class Snapshots():
             print("Read the POD bases for component %s"%comp)
             self.eigs[comp]=np.load(self.POD_folder+"/eigs_"+comp+".npy")
             self.N_POD[comp] = len(self.eigs[comp])
+            if NPOD_max is not None:
+                self.N_POD[comp] = min(self.N_POD[comp], NPOD_max[ic])
             self.Z_comp[comp] = rbnics.backends.dolfin.functions_list.FunctionsList(W)
-            outxdmf_RB = XDMFFile(self.snap_folder+"/POD_basis_%s.xdmf"%comp)
+            outxdmf_RB = XDMFFile(self.POD_folder+"/POD_basis_%s.xdmf"%comp)
             for i in range(self.N_POD[comp]):
                 up_tmp = up.split(deepcopy=True)
                 outxdmf_RB.read_checkpoint(up_tmp[ic],comp,i)
@@ -173,6 +234,11 @@ class Snapshots():
             plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
             plt.close('all')
 
+        # convert RB into matrix
+        self.RB_mat = BasisFunctionsMatrix(W)
+        self.RB_mat.init(["u","p"])
+        self.RB_mat.load(self.POD_folder,  "POD_up")
+
 
         if boundary_tag in ["spalding"]:
             print("Read the POD bases for component %s"%comp)
@@ -181,7 +247,7 @@ class Snapshots():
             self.Z_comp[comp] = rbnics.backends.dolfin.functions_list.FunctionsList(V0)
             outxdmf_RB = XDMFFile(self.snap_folder+"/POD_basis_%s.xdmf"%comp)
             for ib, basis in enumerate(self.Z_comp[comp]):
-                outxdmf_RB.read_checkpoint(tau_penalty,comp,i)
+                outxdmf_RB.read_checkpoint(tau_penalty,comp,ib)
                 self.Z_comp[comp].enrich(tau_penalty)
 
             plt.figure()
@@ -189,50 +255,92 @@ class Snapshots():
             plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
             plt.close('all')
 
+            self.RB_mat_tau = BasisFunctionsMatrix(V0)
+            self.RB_mat_tau.init(["tau"])
+            self.RB_mat_tau.load(self.POD_folder,  "POD_tau")
 
-        # with open(self.snap_folder+"/RB_basis.pickle", "wb") as ff:
-        #     pickle.dump([self.eigs, self.Z_comp], ff)
-
-    # def load_RB(self):
-    #     with open(self.snap_folder+"/RB_basis.pickle","rb") as ff:
-    #         RB_str = pickle.load(ff)
-    #     self.eigs = RB_str[0] 
-    #     self.Z_comp = RB_str[1] 
-
-    #     param = self.training_set.training_set[0]
-    #     param_problem  = self.problem(param)
-    #     self.PODs = []
-    #     for i in range(param_problem.sys_dim):
-    #         self.PODs.append( ProperOrthogonalDecomposition(W, X) )
-                
-    #     for i in range(self.training_set.N_train):
-    #         param_problem  = self.problem(param)
-    #         simul_folder = self.snap_folder+"/n_%03d"%i
-    #         param_problem.compute_numerical_solution(V, mesh= mesh, folder =simul_folder, skip_if_computed=skip_simul_if_computed )
-    #         param_problem.load_all_solutions(self.PODs, simul_folder)
+        if self.with_lifting:
+            lift_xdmf = dict()
+            for comp in ("u","p"):
+                lift_xdmf[comp] = XDMFFile(self.snap_folder+"/lift_%s.xdmf"%comp)
+            
+            self.lift = Function(W)
+            (u_tmp, p_tmp) = self.lift.split(deepcopy=True)
+            lift_xdmf["u"].read_checkpoint(u_tmp ,"u",0)
+            lift_xdmf["p"].read_checkpoint(p_tmp ,"p",0)
+            assign(self.lift, [u_tmp, p_tmp])
 
 
+
+    def project_snapshots(self):
+        # Projecting onto RB space all training snapshots and saving 
+        # coefficients and parameters for learning phase
+        self.all_inputs = []  # time, params
+        self.all_outputs = dict()
+        for comp in self.Z_comp.keys():
+            self.all_outputs[comp] = []
+
+        for i in range(self.training_set.N_train):
+            try:
+                param = self.training_set.training_set[i]
+                simul_folder = self.snap_folder+"/param_%03d"%i
+                up_lift = Function(W)
+                up_lift.assign(get_lifting_factor(param)*self.lift)
+                times_plot, RB_coef, errors = read_FOM_and_project(simul_folder, self.Z_comp, u_lift = up_lift, with_plot=True)
+                for it, time in enumerate(times_plot):
+                    tmp = np.zeros(len(param)+1)
+                    tmp[0] = time
+                    tmp[1:] = param
+                    self.all_inputs.append(tmp)
+                    for comp in self.Z_comp.keys():
+                        self.all_outputs[comp].append(RB_coef[comp][it])
+            except:
+                print(f"Parameter {i} not computed")
+        np.save(self.snap_folder+"/training_input.npy",self.all_inputs)
+        for comp in self.Z_comp.keys():
+            np.save(self.snap_folder+f"/training_output_{comp}.npy",self.all_outputs[comp])
+
+def get_lifting_factor(param):
+    return param[0]
+
+    
 #u_top_val = 5.1
 #nu_val = 1e-3
 
 #solve_FOM([u_top_val,nu_val], out_folder+"/param_trial", with_plot=True)
 
-snapshots = Snapshots(param_range, N=20, snap_folder =out_folder)
-snapshots.compute_snapshots()
+snapshots = Snapshots(param_range, N=20, with_lifting=True, snap_folder =out_folder)
+# snapshots.compute_snapshots()
 
-#param = snapshots.training_set.training_set[0]
-#u_top_val = param[0]
-#nu_val = param[1]
+# param = snapshots.training_set.training_set[0]
+# u_top_val = param[0]
+# nu_val = param[1]
 
 #solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
 
 
-#snapshots.read_snapshots()
-#snapshots.compute_POD(N_POD = 30)
+# snapshots.read_snapshots()
+# snapshots.compute_POD(N_POD = 30)
 
-# snapshots.load_RB()
+snapshots.load_RB()
+#snapshots.project_snapshots()
 
-# solve_FOM([u_top_val,nu_val], out_folder+"/param_trial_RB_proj", \
-#           RB=snapshots.Z_comp, with_plot=True)
 
+up_lift = Function(W)
+param = [u_top_val,nu_val]
+lift_factor = get_lifting_factor(param)
+up_lift.assign(lift_factor*snapshots.lift)
+
+# solve_FOM(param, out_folder+"/param_trial_RB_proj", \
+#            RB=snapshots.Z_comp, with_plot=True, u_lift = up_lift)
+
+solve_POD_Galerkin(param, out_folder+"/param_trial_RB_proj", \
+           snapshots.Z_comp, with_plot=True, u_lift = up_lift, FOM_comparison= True)
+
+# param = snapshots.training_set.training_set[5]
+# up_lift = Function(W)
+# lift_factor = get_lifting_factor(param)
+# up_lift.assign(lift_factor*snapshots.lift)
+# times_plot, RB_coef, errors = read_FOM_and_project(out_folder+"/param_005", snapshots.Z_comp,\
+#                                 u_lift = up_lift, with_plot=True)
 #stop()
