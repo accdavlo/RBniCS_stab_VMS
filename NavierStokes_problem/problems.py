@@ -36,7 +36,7 @@ class Problem:
             channel = Rectangle(Point(self.x_left, self.y_bottom),\
                                 Point(self.x_right, self.y_top))
             cylinder = Circle(Point(self.x_cylinder_center, self.y_cylinder_center), \
-                              self.cylinder_diam/2., 40)
+                              self.cylinder_diam/2., 25)
             self.domain = channel - cylinder
 
             self.mesh = generate_mesh(self.domain,self.Nx)
