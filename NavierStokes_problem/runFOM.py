@@ -1,14 +1,15 @@
 from weak_wallfunction_2D import *
 import rbnics 
 import random
+import matplotlib.pyplot as plt
 random.seed(a=5)
-
+markers = ["1","2","3","+","x","o","s","d","."]
 
 class Parameter():
     def __init__(self,param_range):
         self.dim = len(param_range)
         self.param_range = param_range
-    def generate_training_set(self, N=100):
+    def generate_training_set(self, N=100, plot_folder = None):
         self.N_train = N
         self.training_set = []
         for i in range(self.N_train):
@@ -18,6 +19,17 @@ class Parameter():
                 (self.param_range[k][1]-self.param_range[k][0]) \
                 for k in range(self.dim) ]
             self.training_set.append(new_param)
+        if plot_folder is not None:
+
+            plt.figure()
+            for i, param in enumerate(self.training_set):
+                plt.plot(param[0], param[1], marker = markers[i%len(markers)], label=f"par {i}")
+            plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+            plt.xlabel("u inlet")
+            plt.ylabel("viscosity")
+            plt.tight_layout()
+            plt.savefig(plot_folder+"/training_set.pdf")
+            plt.close()
     
     def generate_test_set(self, N=100):
         self.N_train = N
@@ -40,7 +52,7 @@ param_set = Parameter(param_range)
 class Snapshots():
     def __init__(self, param_range, N = 100, snap_folder = "FOM_snapshots", with_lifting = False ):
         self.training_set = Parameter(param_range)
-        self.training_set.generate_training_set( N )
+        self.training_set.generate_training_set( N, plot_folder =  snap_folder )
         self.snap_folder = snap_folder
         self.with_lifting = with_lifting
         try:      
@@ -143,6 +155,8 @@ class Snapshots():
                         up_lift.assign(self.lift * get_lifting_factor(param))
                         self.POD[comp].store_snapshot(up-up_lift)
                     if boundary_tag=="spalding":
+                        comp = "tau"
+                        inp_xdmf[comp].read_checkpoint(tmp[comp],comp,it)
                         self.POD["tau"].store_snapshot(tmp["tau"])
                 except:
                     reading = False
@@ -177,8 +191,8 @@ class Snapshots():
 
 
         if boundary_tag in ["spalding"]:
-            print("Computing the POD for component %s"%comp)
             comp="tau"
+            print("Computing the POD for component %s"%comp)
             self.eigs[comp],_,self.Z_comp[comp], N = self.POD[comp].apply(N_POD, tol=tol)
             #save bases
             outxdmf_RB = XDMFFile(self.POD_folder+"/POD_basis_%s.xdmf"%comp)
@@ -202,10 +216,11 @@ class Snapshots():
         self.RB_mat.save(self.POD_folder, "POD_up")
 
         if boundary_tag =="spalding":
+            comp ="tau"
             self.RB_mat_tau = BasisFunctionsMatrix(V0)
-            self.RB_mat_tau.init(["tau"])
-            self.RB_mat_tau.enrich(self.Z_comp["tau"],component="tau")
-            self.RB_mat.save(self.POD_folder, "POD_tau")
+            self.RB_mat_tau.init([comp])
+            self.RB_mat_tau.enrich(self.Z_comp[comp])
+            self.RB_mat_tau.save(self.POD_folder, "POD_tau")
 
     def load_RB(self, NPOD_max = None):
         """NPOD_max is a list of maximum mode we want to
@@ -241,6 +256,7 @@ class Snapshots():
 
 
         if boundary_tag in ["spalding"]:
+            comp = "tau"
             print("Read the POD bases for component %s"%comp)
             self.eigs[comp]=np.load(self.POD_folder+"/eigs_"+comp+".npy")
             self.N_POD[comp] = len(self.eigs[comp])
@@ -286,7 +302,10 @@ class Snapshots():
                 simul_folder = self.snap_folder+"/param_%03d"%i
                 up_lift = Function(W)
                 up_lift.assign(get_lifting_factor(param)*self.lift)
-                times_plot, RB_coef, errors = read_FOM_and_project(simul_folder, self.Z_comp, u_lift = up_lift, with_plot=True)
+                if boundary_tag =="spalding":
+                    times_plot, RB_coef, errors = read_FOM_and_project(simul_folder, self.Z_comp, RB_tau = self.RB_mat_tau, u_lift = up_lift, with_plot=True)
+                else:
+                    times_plot, RB_coef, errors = read_FOM_and_project(simul_folder, self.Z_comp, u_lift = up_lift, with_plot=True)
                 for it, time in enumerate(times_plot):
                     tmp = np.zeros(len(param)+1)
                     tmp[0] = time
@@ -309,8 +328,8 @@ def get_lifting_factor(param):
 
 #solve_FOM([u_top_val,nu_val], out_folder+"/param_trial", with_plot=True)
 
-snapshots = Snapshots(param_range, N=20, with_lifting=True, snap_folder =out_folder)
-# snapshots.compute_snapshots()
+snapshots = Snapshots(param_range, N=10, with_lifting=True, snap_folder =out_folder)
+#snapshots.compute_snapshots()
 
 # param = snapshots.training_set.training_set[0]
 # u_top_val = param[0]
@@ -319,11 +338,11 @@ snapshots = Snapshots(param_range, N=20, with_lifting=True, snap_folder =out_fol
 #solve_FOM([u_top_val,nu_val], out_folder+"/param_trial")
 
 
-# snapshots.read_snapshots()
-# snapshots.compute_POD(N_POD = 30)
+snapshots.read_snapshots()
+snapshots.compute_POD(N_POD = 30)
 
 snapshots.load_RB()
-#snapshots.project_snapshots()
+snapshots.project_snapshots()
 
 
 up_lift = Function(W)
@@ -331,11 +350,18 @@ param = [u_top_val,nu_val]
 lift_factor = get_lifting_factor(param)
 up_lift.assign(lift_factor*snapshots.lift)
 
-# solve_FOM(param, out_folder+"/param_trial_RB_proj", \
-#            RB=snapshots.Z_comp, with_plot=True, u_lift = up_lift)
+if boundary_tag=="spalding":
+    solve_FOM(param, out_folder+"/param_trial_RB_proj", \
+            RB=snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, u_lift = up_lift)
 
-solve_POD_Galerkin(param, out_folder+"/param_trial_RB_proj", \
-           snapshots.Z_comp, with_plot=True, u_lift = up_lift, FOM_comparison= True)
+    solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
+            snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, u_lift = up_lift, FOM_comparison= True)
+else:
+    solve_FOM(param, out_folder+"/param_trial_RB_proj", \
+            RB=snapshots.Z_comp, with_plot=True, u_lift = up_lift)
+
+    solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
+            snapshots.Z_comp, with_plot=True, u_lift = up_lift, FOM_comparison= True)
 
 # param = snapshots.training_set.training_set[5]
 # up_lift = Function(W)

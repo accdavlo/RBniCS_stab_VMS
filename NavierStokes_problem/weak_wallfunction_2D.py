@@ -34,7 +34,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag = "weak" # "spalding"#"weak" # "strong"# "spalding"# 
+boundary_tag = "spalding"#"weak" # "weak" # "strong"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -1196,7 +1196,10 @@ def solve_FOM(param, folder_simulation, RB = None, RB_tau=None, u_lift=None, wit
             plt.semilogy(times_plot[1:], errors["p"][1:], label="error p")
             if boundary_tag in ["spalding"]:
                 plt.semilogy(times_plot, errors["tau"], label="error tau")
-            components = ["u","p"]
+            if boundary_tag == "spalding":
+                components = ["u","p", "tau"]
+            else:
+                components = ["u","p"]
             plt.ylim([min([min(errors[comp][4:]) for comp in components])*0.8,\
                       max([max(errors[comp][:]) for comp in components])*1.2])
             plt.legend()
@@ -1205,7 +1208,10 @@ def solve_FOM(param, folder_simulation, RB = None, RB_tau=None, u_lift=None, wit
             plt.xlabel("Time")
             plt.savefig(folder_simulation+"/errors_vs_time.pdf")
             plt.show(block=False)
-    return times_plot, RB_coef, errors
+    if RB is None:
+        return times_plot
+    else:
+        return times_plot, RB_coef, errors
 
 
 
