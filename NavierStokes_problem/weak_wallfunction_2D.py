@@ -17,7 +17,7 @@ import os
 import petsc4py
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
-from scipy.optimize import bisect
+from scipy.optimize import bisect, newton
 import matplotlib.pyplot as plt
 
 from rbnics.backends import BasisFunctionsMatrix, ProperOrthogonalDecomposition, max as rbnics_max, abs as rbnics_abs
@@ -323,6 +323,10 @@ def solve_spalding_law(u,hb):
 
     return tau_B_ext
 
+def newton_wrapper(inputs):
+    (hb_dof,u_norm_dof) = inputs
+    return newton(spalding_func, C_b_I_value*nu_val/hb_dof, fprime=spalding_der, args=(hb_dof, u_norm_dof, \
+                Chi_Spalding_value, B_Spalding_value, C_b_I_value, nu_val ) )
 
 def bisection_wrapper(inputs):
     (hb_dof,u_norm_dof) = inputs
@@ -346,11 +350,34 @@ def solve_spalding_law_inout(u,hb, tau_B_ext):
 
     # solution of Spalding's law
     tau_B_bound = Function(V0_bound)
+    delta_tau_bound = TrialFunction(V0_bound)
+    test_tau_bound = TestFunction(V0_bound)
 
     inputs = [(hb_bound.vector()[i], u_norm.vector()[i]) for i in map_cell_dof_bound]
+    # Bisection method
+    tic = time_module.time()
     outputs = [bisection_wrapper(inp) for inp in inputs]
-    
+    print(time_module.time()-tic)
     tau_B_bound.vector()[map_cell_dof_bound] = outputs[:]
+
+
+    # # Newton's method
+    # outputs = [newton_wrapper(inp) for inp in inputs]
+    # tau_B_bound.vector()[map_cell_dof_bound] = outputs[:]
+
+
+    # # Fenics
+    # # tau_B_bound.assign(project(C_b_I_value*nu_val/hb_bound,V0_bound))
+    # tau_B_bound.assign(Constant(1e-3))
+    # F_tau = spalding_func_fenics(tau_B_bound, hb_bound, u_norm, Chi_Spalding_value,\
+    #                        B_Spalding_value, C_b_I_value, nu_val)*test_tau_bound *dx
+    
+    # J_tau = derivative(F_tau,tau_B_bound, delta_tau_bound)
+    
+    # tic = time_module.time()
+    # solve(F_tau == 0, tau_B_bound, J=J_tau, \
+    #       solver_parameters={"newton_solver":{"absolute_tolerance":1e-12, "relative_tolerance":1e-15} })
+    # print(time_module.time()-tic)
 
     # Extending the solution vector to the whole mesh
     tau_B_ext.vector()[interp_V0_V0_bound.row] = tau_B_bound.vector()[interp_V0_V0_bound.col]
@@ -380,6 +407,27 @@ def spalding_func(tau, hb, unorm, Chi, B, C_b_I, nu):
     up = unorm/us           # u^+
     Chiup = Chi*up          # \Chi*u^+
     sp = yp-up-np.exp(-Chi*B)*(np.exp(Chiup)-1.-Chiup-Chiup**2/2.-Chiup**3/6.) # Spalding's law
+    return sp
+
+
+def spalding_func_fenics(tau, hb, unorm, Chi, B, C_b_I, nu):
+    """ Spalding's law
+    SL(tau) = y^+-u^+-e^{-\Chi B}(e^{\Chi u^+} -1 -\Chi u^+ -(\Chi u^+)^2/2-(\Chi u^+)^3/6)
+    Where it holds tau_B = (u^*)^2/||u||, y^+=yu^*/\nu , u^+=||u||/u^*, y = h_b/C_b^I
+    Hence, one can write SL(tau) as a function of tau, hb, ||u|| and constants
+    Details: https://www.doi.org/10.1016/j.cma.2007.06.026
+    Inputs:
+    tau unknown parameter
+    h_b = 2*sqrt(dot(n,G*n)) mesh dependent parameter
+    ||u|| function of the solution velocity u 
+    Chi, B, C_b^I, nu constants
+    """
+    y = hb/C_b_I 
+    us = sqrt(tau*unorm+Constant(1e-16)) # u^*
+    yp = y*us/nu            # y^+
+    up = unorm/us           # u^+
+    Chiup = Chi*up          # \Chi*u^+
+    sp = yp-up-exp(-Chi*B)*(exp(Chiup)-1.-Chiup-Chiup**2/2.-Chiup**3/6.) # Spalding's law
     return sp
     
 def spalding_der(tau, hb, unorm, Chi, B, C_b_I, nu):
@@ -1208,6 +1256,7 @@ def solve_FOM(param, folder_simulation, RB = None, RB_tau=None, u_lift=None, wit
             plt.xlabel("Time")
             plt.savefig(folder_simulation+"/errors_vs_time.pdf")
             plt.show(block=False)
+        plt.close('all')
     if RB is None:
         return times_plot
     else:
@@ -1301,7 +1350,7 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
 
             assign(up, [u_tmp, p_tmp])
             if boundary_tag=="spalding":
-                filexdmf_u.read_checkpoint(tau_penalty,"tau",i)
+                filexdmf_tau.read_checkpoint(tau_penalty,"tau",i)
 
             if i==0:
                 lift_loc = None
@@ -1325,16 +1374,19 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
 
             outfile_uRB << u_hat_deep
             outfile_pRB << p_hat_deep
+            if boundary_tag=="spalding":
+                outfile_tauRB << tau_hat
 
             if i==0:    
                 outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=False)
                 outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=False)
+                if boundary_tag=="spalding":
+                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=False)
             else:
                 outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=True)
                 outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=True)
-
-            if boundary_tag in ["spalding"]:
-                outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=False) 
+                if boundary_tag=="spalding":
+                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=True)
 
             # Computing errors
             print("before error")
@@ -1468,6 +1520,247 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
     plt.close('all')
     return times_plot, RB_coef, errors
 
+
+
+
+def read_FOM_and_RB_tau(folder_simulation, RB_tau, tauRB_file, with_plot = False):
+    try:
+        os.mkdir(folder_simulation)
+    except:
+        print("Probably folder %s already exists "%folder_simulation)
+    
+    data_file = folder_simulation+"/data.npz"
+    data_struct = np.load(data_file)
+    times = data_struct['arr_0']
+    param = data_struct['arr_1']
+    computational_time = data_struct['arr_2'] 
+    times_plot = reconstruct_time_plot(times)
+
+    u_top_val = param[0]
+    nu_val = param[1]
+
+    W_u =FunctionSpace(mesh,V_element)
+    W_p =FunctionSpace(mesh,Q_element)
+     
+
+    filexdmf_u  = XDMFFile(folder_simulation+"/u.xdmf")
+    filexdmf_p  = XDMFFile(folder_simulation+"/p.xdmf")
+    if boundary_tag in ["spalding", "weak"]:
+        filexdmf_tau  = XDMFFile(folder_simulation+"/tau.xdmf")
+
+    
+    up_hat = Function(W)
+
+
+    outfile_uRB = File(folder_simulation+"/uRB.pvd")
+    outfile_pRB = File(folder_simulation+"/pRB.pvd")
+    if boundary_tag in ["spalding"]:
+        outfile_tauRB = File(folder_simulation+"/tauRB.pvd")
+
+
+    outxdmf_uRB = XDMFFile(folder_simulation+"/uRB.xdmf")
+    outxdmf_pRB = XDMFFile(folder_simulation+"/pRB.xdmf")
+    if boundary_tag in ["spalding"]:
+        outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB.xdmf")
+
+
+    RB_coef = dict()
+    errors = dict()
+
+    err = Function(W)
+
+    components = ["u","p"]
+    if boundary_tag=="spalding":
+        components.append("tau")
+        tau_err = Function(V0)
+    
+
+    for comp in components:
+        RB_coef[comp]=[]
+        errors[comp]=[]
+
+    # PROJECTING ONTO RB
+    foundSolution = True
+    i=0
+    while foundSolution:
+        try:
+            (u_tmp, p_tmp) = up.split(deepcopy=True)
+            filexdmf_u.read_checkpoint(u_tmp,"u",i)
+            filexdmf_p.read_checkpoint(p_tmp,"p",i)
+
+            print("after reading")
+
+            assign(up, [u_tmp, p_tmp])
+            if boundary_tag=="spalding":
+                filexdmf_tau.read_checkpoint(tau_penalty,"tau",i)
+
+            if i==0:
+                lift_loc = None
+            else:
+                lift_loc = u_lift
+
+            if boundary_tag=="spalding":
+                up_RB = project_onto_RB(RB, up, RB_tau = RB_tau, tau_FOM = tau_penalty, u_lift=lift_loc)
+                tau_hat = Function(V0)
+            else:
+                up_RB = project_onto_RB(RB, up, u_lift=lift_loc)
+                tau_hat = None
+
+            for comp in components:
+                RB_coef[comp].append(up_RB[comp])
+            
+            reconstruct_RB(RB, up_RB, up_hat, tau_hat=tau_hat, RB_tau=RB_tau, u_lift=lift_loc )
+            (u_hat_deep, p_hat_deep) = up_hat.split(deepcopy=True)
+            
+            print("after reconstruction")
+
+            outfile_uRB << u_hat_deep
+            outfile_pRB << p_hat_deep
+            if boundary_tag=="spalding":
+                outfile_tauRB << tau_hat
+
+            if i==0:    
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=False)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=False)
+                if boundary_tag=="spalding":
+                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=False)
+            else:
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=True)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=True)
+                if boundary_tag=="spalding":
+                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=True)
+
+            # Computing errors
+            print("before error")
+
+            err.assign(up-up_hat)
+            for comp in ("u","p"):
+                errors[comp].append(\
+                    (X_inner[comp]*err.vector()).inner(err.vector())/\
+                    ((X_inner[comp]*up.vector()).inner(up.vector())+1e-100)) 
+            if boundary_tag=="spalding":
+                comp= "tau"
+                tau_err.assign(tau_penalty-tau_hat)
+                errors["tau"].append(\
+                    (X_inner[comp]*tau_err.vector()).inner(tau_err.vector())/\
+                    ((X_inner[comp]*tau_penalty.vector()).inner(tau_penalty.vector())+1e-100))
+
+            i+=1
+            print("Read step ",i)
+        except:
+            foundSolution =False
+
+    for comp in components:
+        RB_coef[comp]=np.array(RB_coef[comp])
+        np.save(folder_simulation+"/RB_coef_proj_"+comp+".npy",RB_coef[comp])
+    np.save(folder_simulation+"/times_plot.npy",times_plot)
+    
+
+    # if with_plot:
+    #     for ic, comp in enumerate(components):
+    #         for i in range(len(RB[comp])):
+    #             plt.figure()
+    #             plot(RB[comp][i].sub(ic))
+    #             plt.title(f"POD {i} basis {comp}")
+    #             plt.show()
+
+    if with_plot:
+        plt.figure()
+        pp=plot(p); plt.colorbar(pp)
+        plt.title("Pressure")
+        plt.savefig(folder_simulation+"/p_final.png")
+        plt.show(block=False)
+
+        plt.figure()
+        pp=plot(u); plt.colorbar(pp)
+        plt.title("Velocity")
+        plt.savefig(folder_simulation+"/u_final.png")
+        plt.show(block=False)
+
+        plt.figure()
+        pp=plot(u[0]); plt.colorbar(pp)
+        plt.title("u")
+        plt.show(block=False)
+
+        plt.figure()
+        pp=plot(u[1]); plt.colorbar(pp)
+        plt.title("v")
+        plt.show(block=False)
+
+
+        if boundary_tag in ["spalding"]:
+            plt.figure()
+            pp=plot(tau_penalty); plt.colorbar(pp)
+            plt.title("Tau penalty")
+            plt.savefig(folder_simulation+"/tau_final.png")
+            plt.show(block=False)
+
+        if RB is not None:
+            plt.figure()
+            pp=plot(up_hat.sub(0)); plt.colorbar(pp)
+            plt.title("Velocity RB")
+            plt.savefig(folder_simulation+"/u_RB_proj_final.png")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(up_hat.sub(1)); plt.colorbar(pp)
+            plt.title("Pressure RB")
+            plt.savefig(folder_simulation+"/p_RB_proj_final.png")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(up_hat.sub(0)[0]); plt.colorbar(pp)
+            plt.title("uRB")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(up_hat.sub(0)[1]); plt.colorbar(pp)
+            plt.title("vRB")
+            plt.show(block=False)
+
+
+            if boundary_tag in ["spalding"]:
+                plt.figure()
+                pp=plot(tau_hat); plt.colorbar(pp)
+                plt.title("Tau penalty  RB")
+                plt.savefig(folder_simulation+"/tau_RB_proj_final.png")
+                plt.show(block=False)
+
+            plt.figure()
+            pp=plot(err.sub(0)); plt.colorbar(pp)
+            plt.title("Velocity error")
+            plt.savefig(folder_simulation+"/err_u_RB_proj_final.png")
+            plt.show(block=False)
+
+            plt.figure()
+            pp=plot(err.sub(1)); plt.colorbar(pp)
+            plt.title("Pressure error")
+            plt.savefig(folder_simulation+"/err_p_RB_proj_final.png")
+            plt.show(block=False)
+
+
+            if boundary_tag in ["spalding"]:
+                plt.figure()
+                pp=plot(tau_err); plt.colorbar(pp)
+                plt.title("Tau penalty error")
+                plt.savefig(folder_simulation+"/err_tau_RB_proj_final.png")
+                plt.show(block=False)
+
+            plt.figure()
+            plt.semilogy(times_plot, errors["u"], label="error u")
+            plt.semilogy(times_plot, errors["p"], label="error p")
+            if boundary_tag in ["spalding"]:
+                plt.semilogy(times_plot, errors["tau"], label="error tau")
+            plt.ylim([min([min(errors[comp][4:]) for comp in components])*0.8,\
+                      max([max(errors[comp][:]) for comp in components])*1.2])
+            plt.grid(True)
+            plt.xlabel("Time")
+            plt.ylabel("Relative error")
+            plt.legend()
+            plt.savefig(folder_simulation+"/errors_vs_time.pdf")
+            plt.show(block=False)
+    plt.close('all')
+    return times_plot, RB_coef, errors
 
 
 def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None, with_plot = False, FOM_comparison = False):
