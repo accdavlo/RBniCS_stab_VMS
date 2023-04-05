@@ -254,8 +254,8 @@ class Snapshots():
             self.eigs[comp]=np.load(self.POD_folder+"/eigs_"+comp+".npy")
             self.N_POD[comp] = len(self.eigs[comp])
             self.Z_comp[comp] = rbnics.backends.dolfin.functions_list.FunctionsList(V0)
-            outxdmf_RB = XDMFFile(self.snap_folder+"/POD_basis_%s.xdmf"%comp)
-            for ib, basis in enumerate(self.Z_comp[comp]):
+            outxdmf_RB = XDMFFile(self.POD_folder+"/POD_basis_%s.xdmf"%comp)
+            for ib in range(self.N_POD[comp]):
                 outxdmf_RB.read_checkpoint(tau_penalty,comp,ib)
                 self.Z_comp[comp].enrich(tau_penalty)
 

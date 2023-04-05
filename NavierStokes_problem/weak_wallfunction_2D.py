@@ -1451,30 +1451,30 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
             pp=plot(tau_penalty); plt.colorbar(pp)
             plt.title("Tau penalty")
             plt.savefig(folder_simulation+"/tau_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
         if RB is not None:
             plt.figure()
             pp=plot(up_hat.sub(0)); plt.colorbar(pp)
             plt.title("Velocity RB")
             plt.savefig(folder_simulation+"/u_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(up_hat.sub(1)); plt.colorbar(pp)
             plt.title("Pressure RB")
             plt.savefig(folder_simulation+"/p_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(up_hat.sub(0)[0]); plt.colorbar(pp)
             plt.title("uRB")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(up_hat.sub(0)[1]); plt.colorbar(pp)
             plt.title("vRB")
-            plt.show(block=False)
+            # plt.show(block=False)
 
 
             if boundary_tag in ["spalding"]:
@@ -1482,19 +1482,19 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
                 pp=plot(tau_hat); plt.colorbar(pp)
                 plt.title("Tau penalty  RB")
                 plt.savefig(folder_simulation+"/tau_RB_proj_final.png")
-                plt.show(block=False)
+                # plt.show(block=False)
 
             plt.figure()
             pp=plot(err.sub(0)); plt.colorbar(pp)
             plt.title("Velocity error")
             plt.savefig(folder_simulation+"/err_u_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(err.sub(1)); plt.colorbar(pp)
             plt.title("Pressure error")
             plt.savefig(folder_simulation+"/err_p_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
 
             if boundary_tag in ["spalding"]:
@@ -1502,7 +1502,7 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
                 pp=plot(tau_err); plt.colorbar(pp)
                 plt.title("Tau penalty error")
                 plt.savefig(folder_simulation+"/err_tau_RB_proj_final.png")
-                plt.show(block=False)
+                # plt.show(block=False)
 
             plt.figure()
             plt.semilogy(times_plot, errors["u"], label="error u")
@@ -1516,8 +1516,8 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
             plt.ylabel("Relative error")
             plt.legend()
             plt.savefig(folder_simulation+"/errors_vs_time.pdf")
-            plt.show(block=False)
-    plt.close('all')
+            # plt.show(block=False)
+        plt.close('all')
     return times_plot, RB_coef, errors
 
 
