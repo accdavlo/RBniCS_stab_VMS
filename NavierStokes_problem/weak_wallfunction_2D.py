@@ -40,10 +40,10 @@ parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
 
-degree = 1
+degree = 2
 
 
-Nx = 30
+Nx = 100
 problem_name = "cylinder"#"cylinder_turb"#"lid-driven_cavity"
 
 CFL = 0.5
@@ -1301,7 +1301,7 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
 
             assign(up, [u_tmp, p_tmp])
             if boundary_tag=="spalding":
-                filexdmf_u.read_checkpoint(tau_penalty,"tau",i)
+                filexdmf_tau.read_checkpoint(tau_penalty,"tau",i)
 
             if i==0:
                 lift_loc = None
@@ -1325,16 +1325,20 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
 
             outfile_uRB << u_hat_deep
             outfile_pRB << p_hat_deep
+            if boundary_tag in ["spalding"]:
+                outfile_tauRB << tau_hat
 
             if i==0:    
-                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=False)
-                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=False)
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", times_plot[i], XDMFFile.Encoding.HDF5, append=False)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", times_plot[i], XDMFFile.Encoding.HDF5, append=False)
+                if boundary_tag in ["spalding"]:
+                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", times_plot[i], XDMFFile.Encoding.HDF5, append=False) 
             else:
-                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=True)
-                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=True)
+                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", times_plot[i], XDMFFile.Encoding.HDF5, append=True)
+                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", times_plot[i], XDMFFile.Encoding.HDF5, append=True)
 
-            if boundary_tag in ["spalding"]:
-                outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=False) 
+                if boundary_tag in ["spalding"]:
+                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", times_plot[i], XDMFFile.Encoding.HDF5, append=True) 
 
             # Computing errors
             print("before error")
@@ -1375,23 +1379,23 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
         pp=plot(p); plt.colorbar(pp)
         plt.title("Pressure")
         plt.savefig(folder_simulation+"/p_final.png")
-        plt.show(block=False)
+        # plt.show(block=False)
 
         plt.figure()
         pp=plot(u); plt.colorbar(pp)
         plt.title("Velocity")
         plt.savefig(folder_simulation+"/u_final.png")
-        plt.show(block=False)
+        # plt.show(block=False)
 
         plt.figure()
         pp=plot(u[0]); plt.colorbar(pp)
         plt.title("u")
-        plt.show(block=False)
+        # plt.show(block=False)
 
         plt.figure()
         pp=plot(u[1]); plt.colorbar(pp)
         plt.title("v")
-        plt.show(block=False)
+        # plt.show(block=False)
 
 
         if boundary_tag in ["spalding"]:
@@ -1399,30 +1403,30 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
             pp=plot(tau_penalty); plt.colorbar(pp)
             plt.title("Tau penalty")
             plt.savefig(folder_simulation+"/tau_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
         if RB is not None:
             plt.figure()
             pp=plot(up_hat.sub(0)); plt.colorbar(pp)
             plt.title("Velocity RB")
             plt.savefig(folder_simulation+"/u_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(up_hat.sub(1)); plt.colorbar(pp)
             plt.title("Pressure RB")
             plt.savefig(folder_simulation+"/p_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(up_hat.sub(0)[0]); plt.colorbar(pp)
             plt.title("uRB")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(up_hat.sub(0)[1]); plt.colorbar(pp)
             plt.title("vRB")
-            plt.show(block=False)
+            # plt.show(block=False)
 
 
             if boundary_tag in ["spalding"]:
@@ -1430,19 +1434,19 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
                 pp=plot(tau_hat); plt.colorbar(pp)
                 plt.title("Tau penalty  RB")
                 plt.savefig(folder_simulation+"/tau_RB_proj_final.png")
-                plt.show(block=False)
+                # plt.show(block=False)
 
             plt.figure()
             pp=plot(err.sub(0)); plt.colorbar(pp)
             plt.title("Velocity error")
             plt.savefig(folder_simulation+"/err_u_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
             plt.figure()
             pp=plot(err.sub(1)); plt.colorbar(pp)
             plt.title("Pressure error")
             plt.savefig(folder_simulation+"/err_p_RB_proj_final.png")
-            plt.show(block=False)
+            # plt.show(block=False)
 
 
             if boundary_tag in ["spalding"]:
@@ -1450,7 +1454,7 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
                 pp=plot(tau_err); plt.colorbar(pp)
                 plt.title("Tau penalty error")
                 plt.savefig(folder_simulation+"/err_tau_RB_proj_final.png")
-                plt.show(block=False)
+                # plt.show(block=False)
 
             plt.figure()
             plt.semilogy(times_plot, errors["u"], label="error u")
@@ -1464,8 +1468,8 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
             plt.ylabel("Relative error")
             plt.legend()
             plt.savefig(folder_simulation+"/errors_vs_time.pdf")
-            plt.show(block=False)
-    plt.close('all')
+            # plt.show(block=False)
+        plt.close('all')
     return times_plot, RB_coef, errors
 
 
