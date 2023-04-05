@@ -122,6 +122,19 @@ def project_onto_RB(RB, u_FOM_input, u_lift=None, RB_tau = None, tau_FOM=None ):
     return uRB 
 
 
+def project_onto_RB_tau(RB_tau, tau_FOM ):
+    """ Inputs:
+    RB_tau is an RBniCS matrix of reduced spaces or a dictionary of RB spaces
+    tau_FOM is the FOM solution to be project
+    """
+    comp = "tau"
+    NRB = len(RB_tau[comp])
+    tauRB = np.zeros(NRB)
+    for j in range(NRB):
+        tauRB[j] = (X_inner[comp]*RB_tau[comp][j]).inner(tau_FOM.vector())
+    return tauRB 
+
+
 def project_onto_RB_rbnics(RB_mat, u_FOM, u_lift=None, RB_tau = None, tau_FOM = None):
     """ Inputs:
     RB_mat is an RBniCS matrix of reduced spaces
@@ -183,6 +196,13 @@ def reconstruct_RB(RB, u_RB, u_hat, RB_tau = None, tau_hat=None, u_lift = None):
         comp = "tau"
         NRB = len(RB_tau[comp])  
         tau_hat.vector()[:] = sum([u_RB[comp][j]*RB_tau[comp][j].vector() for j in range(NRB)])
+
+
+def reconstruct_RB_tau(RB_tau, tau_RB, tau_hat):
+    comp = "tau"
+    NRB = len(RB_tau[comp])  
+    tau_hat.vector()[:] = sum([tau_RB[j]*RB_tau[comp][j].vector() for j in range(NRB)])
+
 
 # POD_variables = dict() 
 # ProperOrthogonalDecomposition(V, X_rho)
@@ -1366,6 +1386,8 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
 
             for comp in components:
                 RB_coef[comp].append(up_RB[comp])
+
+            
             
             reconstruct_RB(RB, up_RB, up_hat, tau_hat=tau_hat, RB_tau=RB_tau, u_lift=lift_loc )
             (u_hat_deep, p_hat_deep) = up_hat.split(deepcopy=True)
@@ -1523,7 +1545,7 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
 
 
 
-def read_FOM_and_RB_tau(folder_simulation, RB_tau, tauRB_file, with_plot = False):
+def read_FOM_and_RB_tau(folder_simulation, RB_tau, param_file, tauRB_file, with_plot = False):
     try:
         os.mkdir(folder_simulation)
     except:
@@ -1538,229 +1560,113 @@ def read_FOM_and_RB_tau(folder_simulation, RB_tau, tauRB_file, with_plot = False
 
     u_top_val = param[0]
     nu_val = param[1]
-
-    W_u =FunctionSpace(mesh,V_element)
-    W_p =FunctionSpace(mesh,Q_element)
-     
-
-    filexdmf_u  = XDMFFile(folder_simulation+"/u.xdmf")
-    filexdmf_p  = XDMFFile(folder_simulation+"/p.xdmf")
-    if boundary_tag in ["spalding", "weak"]:
-        filexdmf_tau  = XDMFFile(folder_simulation+"/tau.xdmf")
-
-    
-    up_hat = Function(W)
-
-
-    outfile_uRB = File(folder_simulation+"/uRB.pvd")
-    outfile_pRB = File(folder_simulation+"/pRB.pvd")
-    if boundary_tag in ["spalding"]:
-        outfile_tauRB = File(folder_simulation+"/tauRB.pvd")
-
-
-    outxdmf_uRB = XDMFFile(folder_simulation+"/uRB.xdmf")
-    outxdmf_pRB = XDMFFile(folder_simulation+"/pRB.xdmf")
-    if boundary_tag in ["spalding"]:
-        outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB.xdmf")
-
-
-    RB_coef = dict()
-    errors = dict()
-
-    err = Function(W)
-
-    components = ["u","p"]
-    if boundary_tag=="spalding":
-        components.append("tau")
-        tau_err = Function(V0)
     
 
-    for comp in components:
-        RB_coef[comp]=[]
-        errors[comp]=[]
+    filexdmf_tau  = XDMFFile(folder_simulation+"/tau.xdmf")
+
+    outfile_tauRB = File(folder_simulation+"/tauRB_recon.pvd")
+
+    outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB_recon.xdmf")
+
+    tau_err = Function(V0)
+    
+    param_data = np.load(param_file)  # (N_times x N_params ) params are time, u_in, viscosity 
+    tauRB_all = np.load(tauRB_file)  # (N_times x N_RB )
+
+    RB_coef = []
+    errors_wrt_FOM = []
+    errors_wrt_RB_proj = []
+
+
+    tau_hat = Function(V0)
+    tau_NN  = Function(V0)
+    err_NN_hat = Function(V0)
+    err_NN_FOM  = Function(V0)
 
     # PROJECTING ONTO RB
     foundSolution = True
     i=0
     while foundSolution:
         try:
-            (u_tmp, p_tmp) = up.split(deepcopy=True)
-            filexdmf_u.read_checkpoint(u_tmp,"u",i)
-            filexdmf_p.read_checkpoint(p_tmp,"p",i)
+            comp = "tau"
+            filexdmf_tau.read_checkpoint(tau_penalty,"tau",i)
 
-            print("after reading")
+            tau_RB = project_onto_RB_tau(RB_tau, tau_penalty)
 
-            assign(up, [u_tmp, p_tmp])
-            if boundary_tag=="spalding":
-                filexdmf_tau.read_checkpoint(tau_penalty,"tau",i)
+            RB_coef.append(tau_RB)
 
-            if i==0:
-                lift_loc = None
-            else:
-                lift_loc = u_lift
-
-            if boundary_tag=="spalding":
-                up_RB = project_onto_RB(RB, up, RB_tau = RB_tau, tau_FOM = tau_penalty, u_lift=lift_loc)
-                tau_hat = Function(V0)
-            else:
-                up_RB = project_onto_RB(RB, up, u_lift=lift_loc)
-                tau_hat = None
-
-            for comp in components:
-                RB_coef[comp].append(up_RB[comp])
+            tau_RB_NN = tauRB_all[i,:]
             
-            reconstruct_RB(RB, up_RB, up_hat, tau_hat=tau_hat, RB_tau=RB_tau, u_lift=lift_loc )
-            (u_hat_deep, p_hat_deep) = up_hat.split(deepcopy=True)
-            
-            print("after reconstruction")
+            reconstruct_RB(RB_tau, tau_RB, tau_hat )
+            reconstruct_RB(RB_tau, tau_RB_NN, tau_NN )
 
-            outfile_uRB << u_hat_deep
-            outfile_pRB << p_hat_deep
-            if boundary_tag=="spalding":
-                outfile_tauRB << tau_hat
+            outfile_tauRB << tau_NN
 
             if i==0:    
-                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=False)
-                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=False)
-                if boundary_tag=="spalding":
-                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=False)
+                outxdmf_tauRB.write_checkpoint(tau_NN, "tau", float(i), XDMFFile.Encoding.HDF5, append=False)
             else:
-                outxdmf_uRB.write_checkpoint(u_hat_deep, "u", float(i), XDMFFile.Encoding.HDF5, append=True)
-                outxdmf_pRB.write_checkpoint(p_hat_deep, "p", float(i), XDMFFile.Encoding.HDF5, append=True)
-                if boundary_tag=="spalding":
-                    outxdmf_tauRB.write_checkpoint(tau_hat, "tau", float(i), XDMFFile.Encoding.HDF5, append=True)
+                outxdmf_tauRB.write_checkpoint(tau_NN, "tau", float(i), XDMFFile.Encoding.HDF5, append=True)
 
             # Computing errors
             print("before error")
 
-            err.assign(up-up_hat)
-            for comp in ("u","p"):
-                errors[comp].append(\
-                    (X_inner[comp]*err.vector()).inner(err.vector())/\
-                    ((X_inner[comp]*up.vector()).inner(up.vector())+1e-100)) 
-            if boundary_tag=="spalding":
-                comp= "tau"
-                tau_err.assign(tau_penalty-tau_hat)
-                errors["tau"].append(\
-                    (X_inner[comp]*tau_err.vector()).inner(tau_err.vector())/\
-                    ((X_inner[comp]*tau_penalty.vector()).inner(tau_penalty.vector())+1e-100))
+            err_NN_FOM.assign(tau_penalty-tau_NN)
+            err_NN_hat.assign(tau_hat-tau_NN)
+            comp= "tau"
+            errors_wrt_FOM.append(\
+                (X_inner[comp]*err_NN_FOM.vector()).inner(err_NN_FOM.vector())/\
+                ((X_inner[comp]*tau_penalty.vector()).inner(tau_penalty.vector())+1e-100))
+            errors_wrt_RB_proj.append(\
+                (X_inner[comp]*err_NN_hat.vector()).inner(err_NN_hat.vector())/\
+                ((X_inner[comp]*tau_hat.vector()).inner(tau_hat.vector())+1e-100))
 
             i+=1
             print("Read step ",i)
         except:
             foundSolution =False
 
-    for comp in components:
-        RB_coef[comp]=np.array(RB_coef[comp])
-        np.save(folder_simulation+"/RB_coef_proj_"+comp+".npy",RB_coef[comp])
-    np.save(folder_simulation+"/times_plot.npy",times_plot)
-    
-
-    # if with_plot:
-    #     for ic, comp in enumerate(components):
-    #         for i in range(len(RB[comp])):
-    #             plt.figure()
-    #             plot(RB[comp][i].sub(ic))
-    #             plt.title(f"POD {i} basis {comp}")
-    #             plt.show()
-
     if with_plot:
+
         plt.figure()
-        pp=plot(p); plt.colorbar(pp)
-        plt.title("Pressure")
-        plt.savefig(folder_simulation+"/p_final.png")
+        pp=plot(tau_penalty); plt.colorbar(pp)
+        plt.title("Tau penalty")
+        plt.savefig(folder_simulation+"/tau_final.png")
         plt.show(block=False)
 
         plt.figure()
-        pp=plot(u); plt.colorbar(pp)
-        plt.title("Velocity")
-        plt.savefig(folder_simulation+"/u_final.png")
+        pp=plot(tau_hat); plt.colorbar(pp)
+        plt.title("Tau penalty proj RB")
+        plt.savefig(folder_simulation+"/tau_RB_proj_final.png")
         plt.show(block=False)
 
         plt.figure()
-        pp=plot(u[0]); plt.colorbar(pp)
-        plt.title("u")
+        pp=plot(tau_hat); plt.colorbar(pp)
+        plt.title("Tau penalty predict RB")
+        plt.savefig(folder_simulation+"/tau_RB_predict_final.png")
         plt.show(block=False)
 
         plt.figure()
-        pp=plot(u[1]); plt.colorbar(pp)
-        plt.title("v")
+        pp=plot(err_NN_FOM); plt.colorbar(pp)
+        plt.title("Tau penalty error NN wrt FOM")
+        plt.savefig(folder_simulation+"/err_tau_NN_FOM_final.png")
         plt.show(block=False)
 
+        plt.figure()
+        pp=plot(err_NN_hat); plt.colorbar(pp)
+        plt.title("Tau penalty error NN wrt FOM")
+        plt.savefig(folder_simulation+"/err_tau_NN_proj_RB_final.png")
+        plt.show(block=False)
 
-        if boundary_tag in ["spalding"]:
-            plt.figure()
-            pp=plot(tau_penalty); plt.colorbar(pp)
-            plt.title("Tau penalty")
-            plt.savefig(folder_simulation+"/tau_final.png")
-            plt.show(block=False)
-
-        if RB is not None:
-            plt.figure()
-            pp=plot(up_hat.sub(0)); plt.colorbar(pp)
-            plt.title("Velocity RB")
-            plt.savefig(folder_simulation+"/u_RB_proj_final.png")
-            plt.show(block=False)
-
-            plt.figure()
-            pp=plot(up_hat.sub(1)); plt.colorbar(pp)
-            plt.title("Pressure RB")
-            plt.savefig(folder_simulation+"/p_RB_proj_final.png")
-            plt.show(block=False)
-
-            plt.figure()
-            pp=plot(up_hat.sub(0)[0]); plt.colorbar(pp)
-            plt.title("uRB")
-            plt.show(block=False)
-
-            plt.figure()
-            pp=plot(up_hat.sub(0)[1]); plt.colorbar(pp)
-            plt.title("vRB")
-            plt.show(block=False)
-
-
-            if boundary_tag in ["spalding"]:
-                plt.figure()
-                pp=plot(tau_hat); plt.colorbar(pp)
-                plt.title("Tau penalty  RB")
-                plt.savefig(folder_simulation+"/tau_RB_proj_final.png")
-                plt.show(block=False)
-
-            plt.figure()
-            pp=plot(err.sub(0)); plt.colorbar(pp)
-            plt.title("Velocity error")
-            plt.savefig(folder_simulation+"/err_u_RB_proj_final.png")
-            plt.show(block=False)
-
-            plt.figure()
-            pp=plot(err.sub(1)); plt.colorbar(pp)
-            plt.title("Pressure error")
-            plt.savefig(folder_simulation+"/err_p_RB_proj_final.png")
-            plt.show(block=False)
-
-
-            if boundary_tag in ["spalding"]:
-                plt.figure()
-                pp=plot(tau_err); plt.colorbar(pp)
-                plt.title("Tau penalty error")
-                plt.savefig(folder_simulation+"/err_tau_RB_proj_final.png")
-                plt.show(block=False)
-
-            plt.figure()
-            plt.semilogy(times_plot, errors["u"], label="error u")
-            plt.semilogy(times_plot, errors["p"], label="error p")
-            if boundary_tag in ["spalding"]:
-                plt.semilogy(times_plot, errors["tau"], label="error tau")
-            plt.ylim([min([min(errors[comp][4:]) for comp in components])*0.8,\
-                      max([max(errors[comp][:]) for comp in components])*1.2])
-            plt.grid(True)
-            plt.xlabel("Time")
-            plt.ylabel("Relative error")
-            plt.legend()
-            plt.savefig(folder_simulation+"/errors_vs_time.pdf")
-            plt.show(block=False)
-    plt.close('all')
-    return times_plot, RB_coef, errors
+        plt.figure()
+        plt.semilogy(times_plot, errors_wrt_FOM, label="error wrt FOM")
+        plt.semilogy(times_plot, errors_wrt_RB_proj, label="error wrt RB proj")
+        plt.grid(True)
+        plt.xlabel("Time")
+        plt.ylabel("Relative error")
+        plt.legend()
+        plt.savefig(folder_simulation+"/tau_errors_vs_time.pdf")
+        plt.show(block=False)
+        plt.close('all')
 
 
 def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None, with_plot = False, FOM_comparison = False):

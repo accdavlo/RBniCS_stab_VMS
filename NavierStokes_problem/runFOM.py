@@ -300,6 +300,10 @@ class Snapshots():
 
         for i in range(self.training_set.N_train):
             try:
+                inputs = []
+                outputs = dict()
+                for comp in self.Z_comp.keys():
+                    outputs[comp] = []
                 param = self.training_set.training_set[i]
                 simul_folder = self.snap_folder+"/param_%03d"%i
                 up_lift = Function(W)
@@ -313,8 +317,13 @@ class Snapshots():
                     tmp[0] = time
                     tmp[1:] = param
                     self.all_inputs.append(tmp)
+                    inputs.append(tmp)
                     for comp in self.Z_comp.keys():
                         self.all_outputs[comp].append(RB_coef[comp][it])
+                        outputs[comp].append(RB_coef[comp][it])
+                np.save(simul_folder+"/training_input.npy",inputs)
+                for comp in self.Z_comp.keys():
+                    np.save(simul_folder+f"/training_output_{comp}.npy",outputs[comp])
             except:
                 print(f"Parameter {i} not computed")
         np.save(self.snap_folder+"/training_input.npy",self.all_inputs)
@@ -322,6 +331,34 @@ class Snapshots():
             np.save(self.snap_folder+f"/training_output_{comp}.npy",self.all_outputs[comp])
 
     # def compute_tau_errors(self):
+    #     for i in range(self.training_set.N_train):
+    #         try:
+    #             param = self.training_set.training_set[i]
+    #             simul_folder = self.snap_folder+"/param_%03d"%i
+    #             up_lift = Function(W)
+    #             up_lift.assign(get_lifting_factor(param)*self.lift)
+    #             if boundary_tag =="spalding":
+    #                 times_plot, RB_coef, errors = read_FOM_and_project(simul_folder, self.Z_comp, RB_tau = self.RB_mat_tau, u_lift = up_lift, with_plot=True)
+    #             else:
+    #                 times_plot, RB_coef, errors = read_FOM_and_project(simul_folder, self.Z_comp, u_lift = up_lift, with_plot=True)
+    #             for it, time in enumerate(times_plot):
+    #                 tmp = np.zeros(len(param)+1)
+    #                 tmp[0] = time
+    #                 tmp[1:] = param
+    #                 self.all_inputs.append(tmp)
+    #                 inputs.append(tmp)
+    #                 for comp in self.Z_comp.keys():
+    #                     self.all_outputs[comp].append(RB_coef[comp][it])
+    #                     outputs[comp].append(RB_coef[comp][it])
+    #             np.save(simul_folder+"/training_input.npy",inputs)
+    #             for comp in self.Z_comp.keys():
+    #                 np.save(simul_folder+f"/training_output_{comp}.npy",outputs[comp])
+    #         except:
+    #             print(f"Parameter {i} not computed")
+    #     np.save(self.snap_folder+"/training_input.npy",self.all_inputs)
+    #     for comp in self.Z_comp.keys():
+    #         np.save(self.snap_folder+f"/training_output_{comp}.npy",self.all_outputs[comp])
+
 
 
 def get_lifting_factor(param):
@@ -333,7 +370,7 @@ def get_lifting_factor(param):
 
 # solve_FOM([u_top_val,nu_val], out_folder+"/param_trial", with_plot=True)
 
-snapshots = Snapshots(param_range, N=10, with_lifting=True, snap_folder =out_folder)
+snapshots = Snapshots(param_range, N=20, with_lifting=True, snap_folder =out_folder)
 #snapshots.compute_snapshots()
 
 # param = snapshots.training_set.training_set[0]
