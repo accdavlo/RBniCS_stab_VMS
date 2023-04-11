@@ -40,10 +40,10 @@ parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
 parameters.parse(argv = argv[0:1] + args.split())
 
-degree = 1
+degree = 2
 
 
-Nx = 30
+Nx = 100
 problem_name = "cylinder"#"cylinder_turb"#"lid-driven_cavity"
 
 CFL = 0.5
@@ -378,12 +378,12 @@ def solve_spalding_law_inout(u,hb, tau_B_ext):
     delta_tau_bound = TrialFunction(V0_bound)
     test_tau_bound = TestFunction(V0_bound)
 
-    # inputs = [(hb_bound.vector()[i], u_norm.vector()[i]) for i in map_cell_dof_bound]
-    # # Bisection method
-    # tic = time_module.time()
-    # outputs = [bisection_wrapper(inp) for inp in inputs]
-    # print(time_module.time()-tic)
-    # tau_B_bound.vector()[map_cell_dof_bound] = outputs[:]
+    inputs = [(hb_bound.vector()[i], u_norm.vector()[i]) for i in map_cell_dof_bound]
+    # Bisection method
+    tic = time_module.time()
+    outputs = [bisection_wrapper(inp) for inp in inputs]
+    print(time_module.time()-tic)
+    tau_B_bound.vector()[map_cell_dof_bound] = outputs[:]
 
 
     # # Newton's method
@@ -391,18 +391,18 @@ def solve_spalding_law_inout(u,hb, tau_B_ext):
     # tau_B_bound.vector()[map_cell_dof_bound] = outputs[:]
 
 
-    # Fenics
-    # tau_B_bound.assign(project(C_b_I_value*nu_val/hb_bound,V0_bound))
-    tau_B_bound.assign(Constant(1e-3))
-    F_spalding = spalding_func_fenics(tau_B_bound, hb_bound, u_norm, Chi_Spalding_value,\
-                           B_Spalding_value, C_b_I_value, nu_val)*test_tau_bound *dx
+    # # Fenics
+    # # tau_B_bound.assign(project(C_b_I_value*nu_val/hb_bound,V0_bound))
+    # tau_B_bound.assign(Constant(1e-3))
+    # F_spalding = spalding_func_fenics(tau_B_bound, hb_bound, u_norm, Chi_Spalding_value,\
+    #                        B_Spalding_value, C_b_I_value, nu_val)*test_tau_bound *dx
     
-    J_spalding = derivative(F_spalding,tau_B_bound, delta_tau_bound)
+    # J_spalding = derivative(F_spalding,tau_B_bound, delta_tau_bound)
     
-    tic = time_module.time()
-    solve(F_spalding == 0, tau_B_bound, J=J_spalding, \
-          solver_parameters={"newton_solver":{"absolute_tolerance":1e-12, "relative_tolerance":1e-15} })
-    print(time_module.time()-tic)
+    # tic = time_module.time()
+    # solve(F_spalding == 0, tau_B_bound, J=J_spalding, \
+    #       solver_parameters={"newton_solver":{"absolute_tolerance":1e-12, "relative_tolerance":1e-15} })
+    # print(time_module.time()-tic)
 
     # Extending the solution vector to the whole mesh
     tau_B_ext.vector()[interp_V0_V0_bound.row] = tau_B_bound.vector()[interp_V0_V0_bound.col]
@@ -1190,12 +1190,6 @@ def solve_FOM(param, folder_simulation, RB = None, RB_tau=None, u_lift=None, wit
             if boundary_tag in ["spalding"]:
                 outxdmf_tau.write_checkpoint(tau_penalty, "tau", time, XDMFFile.Encoding.HDF5, append=True)
 
-            up_tmp = Function(W)
-            (u_tmp, p_tmp) = up_tmp.split(deepcopy=True)
-            outxdmf_u.read_checkpoint(u_tmp, "u", 1)
-            outxdmf_p.read_checkpoint(p_tmp, "p", 1)
-            assign(up_tmp, [u_tmp,p_tmp])
-
             outfile_u << u
             outfile_p << p
             if boundary_tag in ["spalding"]:
@@ -1291,6 +1285,16 @@ def solve_FOM(param, folder_simulation, RB = None, RB_tau=None, u_lift=None, wit
 
         with open(folder_simulation+"/RB_proj_errors.pickle", "wb") as ff:
             pickle.dump(errors,ff, protocol=pickle.HIGHEST_PROTOCOL)
+
+        outxdmf_uRB.close()
+        outxdmf_pRB.close()
+        if boundary_tag=="spalding":
+            outxdmf_tauRB.close()
+
+    outxdmf_u.close()
+    outxdmf_p.close()
+    if boundary_tag=="spalding":
+        outxdmf_tau.close()
 
     if with_plot:
         plt.figure()
@@ -1535,6 +1539,11 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
         except:
             foundSolution =False
 
+    outxdmf_pRB.close()
+    outxdmf_uRB.close()
+    filexdmf_u.close()
+    filexdmf_p.close()
+
     len_up = i
 
     if len_up != len(times_plot):
@@ -1600,6 +1609,8 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
                 ((X_inner[comp]*tau_penalty.vector()).inner(tau_penalty.vector())+1e-100))
 
         print("Finished reading tau")
+        filexdmf_tau.close()
+        outxdmf_tauRB.close()
 
 
     for comp in components:
@@ -1799,6 +1810,9 @@ def read_FOM_and_RB_tau(folder_simulation, RB_tau, param_file, tauRB_file, with_
             print("Read step ",i)
         except:
             foundSolution =False
+    
+    filexdmf_tau.close()
+    outxdmf_tauRB.close()
 
     if with_plot:
 
@@ -1845,6 +1859,8 @@ def read_FOM_and_RB_tau(folder_simulation, RB_tau, param_file, tauRB_file, with_
 
 
 def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None, with_plot = False, FOM_comparison = False):
+    first_FOM_snapshots = 10
+
     try:
         os.mkdir(folder_simulation)
     except:
@@ -2179,6 +2195,13 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
                 assign(tau_FOM, tau_penalty)
                 print("Spalding time FOM %e"%toc_spalding_FOM)
 
+            if it < first_FOM_snapshots:
+                print(f"Iteration {it}, I'm using the FOM simulation also for ROM")
+                assign(up_hat, up)
+                assign(up_hat_prev, up)
+                if boundary_tag =="spalding":
+                    assign(tau_hat, tau_FOM)
+
         u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
 
         if boundary_tag=="spalding":
@@ -2201,8 +2224,8 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
             if boundary_tag in ["spalding"]:
                 outxdmf_tauRB.write_checkpoint(tau_hat, "tau", time, XDMFFile.Encoding.HDF5, append=True)
 
-            outfile_uRB << u_hat
-            outfile_pRB << p_hat
+            outfile_uRB << u_hat_deep
+            outfile_pRB << p_hat_deep
             if boundary_tag in ["spalding"]:
                 outfile_tauRB << tau_hat
 
@@ -2227,10 +2250,12 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
                     errors[comp].append(\
                         (X_inner[comp]*err.vector()).inner(err.vector())/\
                         (X_inner[comp]*up.vector()).inner(up.vector())) 
+                    print(f"Error for comp {comp} is {errors[comp][-1]}")
                 if boundary_tag=="spalding":
                     comp= "tau"
                     tau_err.assign(tau_penalty-tau_hat)
                     errors["tau"].append((X_inner[comp]*tau_err.vector()).inner(tau_err.vector()))
+                    print(f"Error for comp {comp} is {errors[comp][-1]}")
 
 
     times_plot.append(time)
@@ -2249,6 +2274,11 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
     if boundary_tag in ["spalding"]:
         outfile_tauRB << tau_hat
 
+    outxdmf_uRB.close()
+    outxdmf_pRB.close()
+    if boundary_tag in ["spalding"]:
+        outxdmf_tauRB.close()
+
     # Saving FOM and errors
     if FOM_comparison:
         (u_deep, p_deep) = up_FOM.split(deepcopy=True)
@@ -2263,8 +2293,12 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
         if boundary_tag in ["spalding"]:
             outfile_tau << tau_FOM
 
-        # Computing errors
+        outxdmf_u.close()
+        outxdmf_p.close()
+        if boundary_tag in ["spalding"]:
+            outxdmf_tau.close()
 
+        # Computing errors
         err.assign(up-up_hat)
         for comp in ("u","p"):
             errors[comp].append(\
@@ -2277,6 +2311,7 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
 
         with open(folder_simulation+"/POD_Galerkin_errors.pickle", "wb") as ff:
             pickle.dump(errors,ff, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 
     print("Average speed up %g"%np.mean(speed_ups))
