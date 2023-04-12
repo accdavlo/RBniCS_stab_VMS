@@ -44,7 +44,7 @@ degree = 2
 
 
 Nx = 100
-problem_name = "cylinder"#"cylinder_turb"#"lid-driven_cavity"
+problem_name = "cylinder_turb"#"cylinder_turb"#"lid-driven_cavity"
 
 CFL = 0.5
 Nt_max = 10000
@@ -2113,6 +2113,7 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
         #solver.solve()
         # up_tmp = Function(W)
         up_prev.assign(up_FOM_prev)
+        up.assign(up_FOM_prev)
         solve(F_weak == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
         # Store the solution in up_prev
         # Plot
