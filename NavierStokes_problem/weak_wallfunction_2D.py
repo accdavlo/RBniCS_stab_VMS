@@ -34,7 +34,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag = "spalding"#"weak" # "weak" # "strong"# "spalding"# 
+boundary_tag = "weak" # "weak" # "strong"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
