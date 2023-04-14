@@ -2160,9 +2160,12 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
             solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
             toc_FOM = time_module.time()-tic_FOM
             print("One step computational time FOM     ",toc_FOM)
-            speed_up = toc_FOM/toc_reduced
-            print("SPEED UP FOM time/ ROM time      ",speed_up)
-            speed_ups.append(speed_up)
+            if time>do_FOM_up_to_time and it>=first_FOM_snapshots:
+                speed_up = toc_FOM/toc_reduced
+                print("SPEED UP FOM time/ ROM time      ",speed_up)
+                speed_ups.append(speed_up)
+            else:
+                speed_ups.append(0.)
 
             # Store the solution in up_prev
             assign(up_FOM_prev, up)
@@ -2225,7 +2228,11 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
 
 
         if boundary_tag=="spalding":
-            print("Percentage spalding %g%%"%(100.*toc_spalding/toc_reduced))
+            if (time>do_FOM_up_to_time and it>=first_FOM_snapshots) or not FOM_comparison:
+                print("Percentage spalding %g%%"%(100.*toc_spalding/toc_reduced))
+            else:
+                print("Percentage spalding %g%%"%(100.*toc_spalding/toc_FOM))
+
         tplot+= dt
         time+= dt
         it+=1
