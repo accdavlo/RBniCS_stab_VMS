@@ -417,28 +417,36 @@ snapshots = Snapshots(param_range, N=20, with_lifting=True, snap_folder =out_fol
 # snapshots.compute_POD(N_POD = 100)
 
 snapshots.load_RB([100,100,30])
-snapshots.project_snapshots()
+# snapshots.project_snapshots()
 
 
 
 
-# up_lift = Function(W)
-# param = [u_top_val,nu_val]
-# lift_factor = get_lifting_factor(param)
-# up_lift.assign(lift_factor*snapshots.lift)
+up_lift = Function(W)
+param = [u_top_val,nu_val]
+lift_factor = get_lifting_factor(param)
+up_lift.assign(lift_factor*snapshots.lift)
 
-# if boundary_tag=="spalding":
-#     # solve_FOM(param, out_folder+"/param_trial_RB_proj", \
-#     #         RB=snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, u_lift = up_lift)
+if boundary_tag=="spalding":
+    # solve_FOM(param, out_folder+"/param_trial_RB_proj", \
+    #         RB=snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, u_lift = up_lift)
 
-#     solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
-#             snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, u_lift = up_lift, FOM_comparison= True)
-# else:
-#     solve_FOM(param, out_folder+"/param_trial_RB_proj", \
-#             RB=snapshots.Z_comp, with_plot=True, u_lift = up_lift)
+    # solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
+    #         snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, \
+    #         u_lift = up_lift, FOM_comparison= True)
+    
+    read_FOM_and_project(out_folder+"/param_trial_RB", snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau,\
+                         u_lift = up_lift, with_plot = True)
 
-#     solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
-#             snapshots.Z_comp, with_plot=True, u_lift = up_lift, FOM_comparison= True)
+else:
+    # solve_FOM(param, out_folder+"/param_trial_RB_proj", \
+    #         RB=snapshots.Z_comp, with_plot=True, u_lift = up_lift)
+
+    solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
+            snapshots.Z_comp, with_plot=True, u_lift = up_lift, FOM_comparison= True)
+
+    read_FOM_and_project(out_folder+"/param_trial_RB", snapshots.Z_comp, \
+                         u_lift = up_lift, with_plot = True)
 
 # param = snapshots.training_set.training_set[5]
 # up_lift = Function(W)

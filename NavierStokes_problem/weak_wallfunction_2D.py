@@ -44,7 +44,7 @@ degree = 2
 
 
 Nx = 100
-problem_name = "cylinder"#"cylinder_turb"#"lid-driven_cavity"
+problem_name = "cylinder_turb"#"cylinder_turb"#"lid-driven_cavity"
 
 CFL = 0.5
 Nt_max = 10000
@@ -1427,12 +1427,24 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
     except:
         print("Probably folder %s already exists "%folder_simulation)
     
-    data_file = folder_simulation+"/data.npz"
-    data_struct = np.load(data_file)
-    times = data_struct['arr_0']
-    param = data_struct['arr_1']
-    computational_time = data_struct['arr_2'] 
-    times_plot = reconstruct_time_plot(times)
+    try:
+        data_file = folder_simulation+"/data.npz"
+        data_struct = np.load(data_file)
+        times = data_struct['arr_0']
+        param = data_struct['arr_1']
+        computational_time = data_struct['arr_2']
+        times_plot = reconstruct_time_plot(times)
+    except:
+        try:
+            print("FIle data.npz not found, I try with data_ROM.npz")
+            data_file = folder_simulation+"/data_ROM.npz"
+            data_struct = np.load(data_file)
+            times = data_struct['arr_0']
+            param = data_struct['arr_1']
+            ROM_computational_time = data_struct['arr_2']
+            times_plot = data_struct['arr_3']
+        except:
+            raise ValueError("Data files not found")
 
     u_top_val = param[0]
     nu_val = param[1]
@@ -1450,16 +1462,16 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
     up_hat = Function(W)
 
 
-    outfile_uRB = File(folder_simulation+"/uRB.pvd")
-    outfile_pRB = File(folder_simulation+"/pRB.pvd")
+    outfile_uRB = File(folder_simulation+"/uRB_proj.pvd")
+    outfile_pRB = File(folder_simulation+"/pRB_proj.pvd")
     if boundary_tag in ["spalding"]:
-        outfile_tauRB = File(folder_simulation+"/tauRB.pvd")
+        outfile_tauRB = File(folder_simulation+"/tauRB_proj.pvd")
 
 
-    outxdmf_uRB = XDMFFile(folder_simulation+"/uRB.xdmf")
-    outxdmf_pRB = XDMFFile(folder_simulation+"/pRB.xdmf")
+    outxdmf_uRB = XDMFFile(folder_simulation+"/uRB_proj.xdmf")
+    outxdmf_pRB = XDMFFile(folder_simulation+"/pRB_proj.xdmf")
     if boundary_tag in ["spalding"]:
-        outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB.xdmf")
+        outxdmf_tauRB = XDMFFile(folder_simulation+"/tauRB_proj.xdmf")
 
 
     RB_coef = dict()
@@ -1723,7 +1735,7 @@ def read_FOM_and_project(folder_simulation, RB, RB_tau=None, u_lift = None, with
             plt.xlabel("Time")
             plt.ylabel("Relative error")
             plt.legend()
-            plt.savefig(folder_simulation+"/errors_vs_time.pdf")
+            plt.savefig(folder_simulation+"/errors_vs_time_proj.pdf")
             # plt.show(block=False)
         plt.close('all')
     return times_plot, RB_coef, errors
@@ -2101,6 +2113,7 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
         #solver.solve()
         # up_tmp = Function(W)
         up_prev.assign(up_FOM_prev)
+        up.assign(up_FOM_prev)
         solve(F_weak == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
         # Store the solution in up_prev
         # Plot
