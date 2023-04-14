@@ -431,21 +431,21 @@ if boundary_tag=="spalding":
     # solve_FOM(param, out_folder+"/param_trial_RB_proj", \
     #         RB=snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, u_lift = up_lift)
 
-    # solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
-    #         snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, \
-    #         u_lift = up_lift, FOM_comparison= True)
+    solve_POD_Galerkin(param, out_folder+"/param_trial_RB_later", \
+            snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau, with_plot=True, \
+            u_lift = up_lift, FOM_comparison= True)
     
-    read_FOM_and_project(out_folder+"/param_trial_RB", snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau,\
+    read_FOM_and_project(out_folder+"/param_trial_RB_later", snapshots.Z_comp, RB_tau = snapshots.RB_mat_tau,\
                          u_lift = up_lift, with_plot = True)
 
 else:
     # solve_FOM(param, out_folder+"/param_trial_RB_proj", \
     #         RB=snapshots.Z_comp, with_plot=True, u_lift = up_lift)
 
-    solve_POD_Galerkin(param, out_folder+"/param_trial_RB", \
+    solve_POD_Galerkin(param, out_folder+"/param_trial_RB_later", \
             snapshots.Z_comp, with_plot=True, u_lift = up_lift, FOM_comparison= True)
 
-    read_FOM_and_project(out_folder+"/param_trial_RB", snapshots.Z_comp, \
+    read_FOM_and_project(out_folder+"/param_trial_RB_later", snapshots.Z_comp, \
                          u_lift = up_lift, with_plot = True)
 
 # param = snapshots.training_set.training_set[5]

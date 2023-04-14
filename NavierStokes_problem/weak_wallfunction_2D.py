@@ -55,16 +55,17 @@ dT=Constant(1.e-5)
 
 if problem_name=="cylinder_turb":
     # Rey = 5 10^4 
-    T = 3.0    #5.0    #0.5 # 0.01
+    T = 3.5    #5.0    #0.5 # 0.01
     dtplot =0.02
     nu_val =  0.000002 #0.000002 #1. # 0.001
     u_top_val = 1. #1.  #100.  # 500 
     param_range = [ [0.5,5.0],# u_in
                 [0.000002,0.00002] # nu
                 ]
+    do_FOM_up_to_time = 1.
 elif problem_name=="cylinder":
     # Rey = 100 
-    T = 3.0    #5.0    #0.5 # 0.01
+    T = 4.0    #5.0    #0.5 # 0.01
     dtplot =0.02
     nu_val =  0.001 #0.000002 #1. # 0.001
     u_top_val = 1. #1.  #100.  # 500
@@ -72,6 +73,7 @@ elif problem_name=="cylinder":
     param_range = [ [0.5,5.0],# u_in
                 [0.0002,0.001] # nu
                 ]
+    do_FOM_up_to_time = 1.5
 
 
 
@@ -2149,39 +2151,6 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
         physical_problem.u_in.t = time
 
         # Solve the nonlinear problems
-
-        #Reduced solve
-        up_prev.assign(up_hat_prev)
-        if boundary_tag=="spalding":
-            tau_penalty.assign(tau_hat)
-
-        tic_reduced = time_module.time()
-        reduced_nonlinear_solver.solve()
-        toc_reduced = time_module.time()-tic_reduced
-        ROM_computational_time += toc_reduced
-
-        print("One step computational time reduced ",toc_reduced)
-        # Assigning
-        assign(up_hat, reconstruct_RB_rbnics(RB_mat, RB_coef, u_lift = u_lift))
-        assign(up_hat_prev, up_hat)
-        RB_coefs["up"].append(RB_coef)
-
-
-        # spalding law, computing tau_penalty
-        # # With POD_Galerink 
-        # if boundary_tag =="spalding":
-        #     tic_spalding= time_module.time()
-        #     solve_spalding_law_inout_reduced(up_hat_prev,hb,tau_hat, RB_tau, RB_tau_bound)
-        #     toc_spalding= time_module.time() - tic_spalding
-        #     print("Spalding time %e"%toc_spalding)
-        if boundary_tag =="spalding":
-            tic_spalding= time_module.time()
-            solve_spalding_law_inout(up_hat_prev,hb,tau_hat)
-            toc_spalding= time_module.time() - tic_spalding
-            print("Spalding time %e"%toc_spalding)
-
-
-        
         if FOM_comparison:
             # Full Solver
             assign(up_prev, up_FOM_prev)
@@ -2208,14 +2177,52 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
                 assign(tau_FOM, tau_penalty)
                 print("Spalding time FOM %e"%toc_spalding_FOM)
 
-            if it < first_FOM_snapshots:
-                print(f"Iteration {it}, I'm using the FOM simulation also for ROM")
-                assign(up_hat, up)
-                assign(up_hat_prev, up)
-                if boundary_tag =="spalding":
-                    assign(tau_hat, tau_FOM)
 
         u_norm = project(sqrt(u[0]**2+u[1]**2),V0)
+
+
+        #Reduced solve
+        up_prev.assign(up_hat_prev)
+        if boundary_tag=="spalding":
+            tau_penalty.assign(tau_hat)
+
+        if (time>do_FOM_up_to_time and it>=first_FOM_snapshots) or not FOM_comparison:
+            tic_reduced = time_module.time()
+            reduced_nonlinear_solver.solve()
+            toc_reduced = time_module.time()-tic_reduced
+            ROM_computational_time += toc_reduced
+
+            print("One step computational time reduced ",toc_reduced)
+            # Assigning
+            assign(up_hat, reconstruct_RB_rbnics(RB_mat, RB_coef, u_lift = u_lift))
+            assign(up_hat_prev, up_hat)
+
+        else:
+            print(f"Iteration {it}, I'm using the FOM simulation also for ROM")
+            assign(up_hat, up)
+            assign(up_hat_prev, up)
+            # RB_coef = 
+            if boundary_tag =="spalding":
+                assign(tau_hat, tau_FOM)
+        # RB_coefs["up"].append(RB_coef)
+
+
+        # spalding law, computing tau_penalty
+        # # With POD_Galerink 
+        # if boundary_tag =="spalding":
+        #     tic_spalding= time_module.time()
+        #     solve_spalding_law_inout_reduced(up_hat_prev,hb,tau_hat, RB_tau, RB_tau_bound)
+        #     toc_spalding= time_module.time() - tic_spalding
+        #     print("Spalding time %e"%toc_spalding)
+        if boundary_tag =="spalding":
+            tic_spalding= time_module.time()
+            solve_spalding_law_inout(up_hat_prev,hb,tau_hat)
+            toc_spalding= time_module.time() - tic_spalding
+            print("Spalding time %e"%toc_spalding)
+
+
+        
+
 
         if boundary_tag=="spalding":
             print("Percentage spalding %g%%"%(100.*toc_spalding/toc_reduced))
