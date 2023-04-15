@@ -34,7 +34,7 @@ from problems import Problem
 
 
 giovanni = True
-boundary_tag = "weak" # "weak" # "strong"# "spalding"# 
+boundary_tag = "spalding"#"weak" # "weak" # "strong"# "spalding"# 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -2160,12 +2160,6 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
             solve(F == 0, up, bcs=bc)#, solver_parameters={"newton_solver":{"relative_tolerance":1e-8} })
             toc_FOM = time_module.time()-tic_FOM
             print("One step computational time FOM     ",toc_FOM)
-            if time>do_FOM_up_to_time and it>=first_FOM_snapshots:
-                speed_up = toc_FOM/toc_reduced
-                print("SPEED UP FOM time/ ROM time      ",speed_up)
-                speed_ups.append(speed_up)
-            else:
-                speed_ups.append(0.)
 
             # Store the solution in up_prev
             assign(up_FOM_prev, up)
@@ -2196,6 +2190,13 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
             ROM_computational_time += toc_reduced
 
             print("One step computational time reduced ",toc_reduced)
+
+            if FOM_comparison:
+                speed_up = toc_FOM/toc_reduced
+                print("SPEED UP FOM time/ ROM time      ",speed_up)
+                speed_ups.append(speed_up)
+
+
             # Assigning
             assign(up_hat, reconstruct_RB_rbnics(RB_mat, RB_coef, u_lift = u_lift))
             assign(up_hat_prev, up_hat)
@@ -2272,15 +2273,15 @@ def solve_POD_Galerkin(param, folder_simulation, RB, RB_tau=None, u_lift = None,
 
                 # Computing errors
 
-                err.assign(up-up_hat)
+                err.assign(up_FOM-up_hat)
                 for comp in ("u","p"):
                     errors[comp].append(\
                         (X_inner[comp]*err.vector()).inner(err.vector())/\
-                        (X_inner[comp]*up.vector()).inner(up.vector())) 
+                        (X_inner[comp]*up_FOM.vector()).inner(up_FOM.vector())) 
                     print(f"Error for comp {comp} is {errors[comp][-1]}")
                 if boundary_tag=="spalding":
                     comp= "tau"
-                    tau_err.assign(tau_penalty-tau_hat)
+                    tau_err.assign(tau_FOM-tau_hat)
                     errors["tau"].append((X_inner[comp]*tau_err.vector()).inner(tau_err.vector()))
                     print(f"Error for comp {comp} is {errors[comp][-1]}")
 
