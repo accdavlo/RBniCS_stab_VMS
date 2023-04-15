@@ -30,9 +30,9 @@ NPOD_output = 30
 
 def preprocess_data_time_0(input_data, output_data, output_data2 = None):
     # removing "time=0" lines
-    input_data = input_data.deepcopy()
-    output_data = output_data.deepcopy()
-    output_data2 = output_data2.deepcopy()
+    input_data = np.copy(input_data)
+    output_data = np.copy(output_data)
+    output_data2 = np.copy(output_data2)
     N_data = input_data.shape[0]
     i=0
     while (i<N_data):
@@ -64,7 +64,7 @@ if train_NN:
     input_data_test = input_data[N_train//2:,:]
     output_data_test = output_data[N_train//2:,:]
 
-    approximation = ezyrb.ANN([100, 100, 100, 100], nn.Tanh(), [20000, 1e-6])
+    approximation = ezyrb.ANN([32, 32, 32], nn.Tanh(), [20000, 1e-3])
     # approximation = ezyrb.RBF()
 
     scaler_input  = MinMaxScaler()
@@ -94,14 +94,14 @@ if train_NN:
         #scaling all outputs
         output_data_test_transformed = ROM.scaler_red.transform(output_data_test)
         print("Test error rescaled")
-        error_test = np.mean(output_data_test_transformed-output_data_predict_test)
+        error_test = np.mean(np.abs(output_data_test_transformed-output_data_predict_test))
         print(error_test)
 
         output_data_predict_test = ROM.scaler_red.inverse_transform(output_data_predict_test)
 
 
     print("Test error")
-    error_test = np.mean(output_data_test-output_data_predict_test)
+    error_test = np.mean(np.abs(output_data_test-output_data_predict_test))
     print(error_test)
     plt.plot(output_data_test[:,:10],"-")
     plt.plot(output_data_predict_test[:,:10],"--")

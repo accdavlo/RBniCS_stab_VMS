@@ -5,8 +5,8 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler,MinMaxScaler
 
-train_NN = False
-predict_phase = True
+train_NN = True
+predict_phase = False
 
 folder = "out_cylinder_test_spalding_gio_P2_N_100"
 
@@ -20,7 +20,7 @@ output_test_file = folder+"/param_trial_RB/training_test_output"
 db = ezyrb.Database()
 reduction = ezyrb.POD()
 
-components = ["tau"]#,"p","tau"]
+components = ["p"]#["tau"]#,"p","tau"]
 ROMs = dict()
 
 
@@ -57,7 +57,7 @@ if train_NN:
 
         NPOD = output_data.shape[1]
 
-        approximation = ezyrb.ANN([100, 100], nn.Tanh(), [20000, 1e-6])
+        approximation = ezyrb.ANN([100, 100], nn.Tanh(), [20000, 1e-3])
         # approximation = ezyrb.RBF()
 
         scaler = MinMaxScaler()
