@@ -331,7 +331,7 @@ preliminary study}
 	\begin{block}{In this talk}
 				\begin{itemize}
 			\item Wall Law model
-			\item \highlightB{POD-Galerkin} vs \highlightB{POD-NN}
+			\item \highlightB{POD-Galerkin}
 			\item Flow past cylinder
 				\end{itemize}
 			\end{block}	
@@ -419,7 +419,7 @@ preliminary study}
 \end{minipage}
 \hfill
 \begin{minipage}{0.49\textwidth}
-\visible<3->{	\begin{block}{Variational Multi-Scale Resiudal based}
+\visible<3->{	\begin{block}{Variational Multi-Scale Resiudal based (FEM)}
 		\begin{itemize}
 			\item $\vec{u} = \vec{u}_h + \vec{u}'$ (all variables) 
 			\item Residual based
@@ -572,9 +572,9 @@ preliminary study}
 		&\mathcal{R} = [0,2.2]\times[-0.41,0.41], \mathcal{C} = \mathcal{B}([0.2,0],0.05), \\
 		&D=\mathcal R \backslash \mathcal C, \qquad T_{end} = 3,\qquad \NDG= 3\cdot 122145,\\
 		&u_{in} = (\mu_1,0), \quad \nu = \mu_2,\\
-\only<2>{		&\text{Test 1: } Re \in [50,2.5\cdot 10^3],\\
-		&\mu_1 \in [0.5,5.0],\quad  \mu_2 \in [2 \cdot 10^{-4}, 10^{-3}],\\}
-\only<3>{		&\text{Test 2: }  Re \in [2.5\cdot 10^3, 2.5\cdot 10^5],\\
+%\only<2>{		&\text{Test 1: } Re \in [50,2.5\cdot 10^3],\\
+%		&\mu_1 \in [0.5,5.0],\quad  \mu_2 \in [2 \cdot 10^{-4}, 10^{-3}],\\}
+\only<2>{		& Re \in [2.5\cdot 10^3, 2.5\cdot 10^5],\\
 		&\mu_1 \in [0.5,5.0],\quad  \mu_2 \in [2 \cdot 10^{-6},2 \cdot 10^{-5}],\\}
 		&\text{No slip BC on top, bottom and circle},				
 	\end{align*}
@@ -582,16 +582,16 @@ preliminary study}
 \end{block}}
 	\end{minipage}
 \begin{center}
+%\only<2>{	\includemedia[
+%	width=0.98\linewidth,
+%	height=0.2\linewidth,
+%	activate=pageopen,
+%	addresource=figures/cylinder_weak.avi,
+%	flashvars={source=figures/cylinder_weak.avi
+%			&loop=true 
+%			&autoPlay=true }
+%	]{}{VPlayer.swf}}
 \only<2>{	\includemedia[
-	width=0.98\linewidth,
-	height=0.2\linewidth,
-	activate=pageopen,
-	addresource=figures/cylinder_weak.avi,
-	flashvars={source=figures/cylinder_weak.avi
-			&loop=true 
-			&autoPlay=true }
-	]{}{VPlayer.swf}}
-\only<3>{	\includemedia[
 width=0.98\linewidth,
 height=0.2\linewidth,
 activate=pageopen,
@@ -637,32 +637,32 @@ flashvars={source=figures/cylinder_turb_weak.avi
 				\item For the moment no computational advantage
 			\end{itemize}
 		\item \highlight{POD-NN}
-		\begin{itemize}
-			\item NN learn map $u_{RB}(t,\mu_1,\mu_2)$ from training set
-			\item Very \highlight{fast} reconstruction
-			\item \highlightB{No physics} involved
-			\item Needs \highlightB{many snapshots} for different parameters (too expensive offline phase)
-		\end{itemize}
+%		\begin{itemize}
+%			\item NN learn map $u_{RB}(t,\mu_1,\mu_2)$ from training set
+%			\item Very \highlight{fast} reconstruction
+%			\item \highlightB{No physics} involved
+%			\item Needs \highlightB{many snapshots} for different parameters (too expensive offline phase)
+%		\end{itemize}
 		\end{itemize}
 	\end{block}
 }
 \end{minipage}
 \end{frame}
+%
+%\begin{frame}{POD results: \highlightB{Test1}, 20 parameters, 150 timesteps}
+%	\begin{tabular}{ccc}
+%		$u$&$p$&$\tau$\\
+%		\includegraphics[width=0.31\textwidth]{figures/cylinder_weak_eigs_u.pdf}&
+%		\includegraphics[width=0.31\textwidth]{figures/cylinder_weak_eigs_p.pdf}&
+%		$\Leftarrow$ Weak BC, Spalding BC $\Downarrow$
+%		\\
+%		\includegraphics[width=0.31\textwidth]{figures/cylinder_spalding_eigs_u.pdf}&
+%		\includegraphics[width=0.31\textwidth]{figures/cylinder_spalding_eigs_p.pdf}&
+%		\includegraphics[width=0.31\textwidth]{figures/cylinder_spalding_eigs_tau.pdf}
+%	\end{tabular}\hfill
+%\end{frame}
 
-\begin{frame}{POD results: \highlightB{Test1}, 20 parameters, 150 timesteps}
-	\begin{tabular}{ccc}
-		$u$&$p$&$\tau$\\
-		\includegraphics[width=0.31\textwidth]{figures/cylinder_weak_eigs_u.pdf}&
-		\includegraphics[width=0.31\textwidth]{figures/cylinder_weak_eigs_p.pdf}&
-		$\Leftarrow$ Weak BC, Spalding BC $\Downarrow$
-		\\
-		\includegraphics[width=0.31\textwidth]{figures/cylinder_spalding_eigs_u.pdf}&
-		\includegraphics[width=0.31\textwidth]{figures/cylinder_spalding_eigs_p.pdf}&
-		\includegraphics[width=0.31\textwidth]{figures/cylinder_spalding_eigs_tau.pdf}
-	\end{tabular}\hfill
-\end{frame}
-
-\begin{frame}{POD results: \highlightB{Test2}, 20 parameters, 150 timesteps}
+\begin{frame}{POD results: 20 parameters, 150 timesteps}
 	\begin{tabular}{ccc}
 		$u$&$p$&$\tau$\\
 		\includegraphics[width=0.31\textwidth]{figures/cylinder_turb_weak_eigs_u.pdf}&
@@ -674,21 +674,21 @@ flashvars={source=figures/cylinder_turb_weak.avi
 		\includegraphics[width=0.31\textwidth]{figures/cylinder_turb_spalding_eigs_tau.pdf}
 	\end{tabular}\hfill
 \end{frame}
+%
+%\begin{frame}{\highlight{POD projection} error: \highlightB{Test1},  $(u_{in},\nu)=(1,0.001)$}
+%	
+%	\begin{center}
+%		$N_{POD}^u=N_{POD}^p=100$, $N_{POD}^\tau=30$
+%	\begin{tabular}{cc}
+%		Weak BC& Spalding\\
+%		\includegraphics[width=0.49\textwidth]{figures/cylinder_weak_errors_vs_time_proj.pdf}&
+%		\includegraphics[width=0.49\textwidth]{figures/cylinder_spalding_errors_vs_time_proj.pdf}
+%	\end{tabular}
+%	\end{center}
+%\end{frame}
 
-\begin{frame}{\highlight{POD projection} error: \highlightB{Test1},  $(u_{in},\nu)=(1,0.001)$}
-	
-	\begin{center}
-		$N_{POD}^u=N_{POD}^p=100$, $N_{POD}^\tau=30$
-	\begin{tabular}{cc}
-		Weak BC& Spalding\\
-		\includegraphics[width=0.49\textwidth]{figures/cylinder_weak_errors_vs_time_proj.pdf}&
-		\includegraphics[width=0.49\textwidth]{figures/cylinder_spalding_errors_vs_time_proj.pdf}
-	\end{tabular}
-	\end{center}
-\end{frame}
 
-
-\begin{frame}{\highlight{POD projection }error: \highlightB{Test2}, $(u_{in},\nu)=(1,2\cdot 10^{-6})$}
+\begin{frame}{\highlight{POD projection }error: $(u_{in},\nu)=(1,2\cdot 10^{-6})$}
 	\begin{center}
 		$N_{POD}^u=N_{POD}^p=100$, $N_{POD}^\tau=30$
 		\begin{tabular}{cc}
@@ -699,19 +699,19 @@ flashvars={source=figures/cylinder_turb_weak.avi
 	\end{center}
 \end{frame}
 
-\begin{frame}{\highlight{POD-Galerkin} error: \highlightB{Test1}, $(u_{in},\nu)=(1,0.001)$}
-	\begin{center}
-		$N_{POD}^u=N_{POD}^p=100$, $\tau$ exact
-		\begin{tabular}{cc}
-			Weak BC& Spalding\\
-			\includegraphics[width=0.49\textwidth]{figures/cylinder_weak_errors_RB_vs_time.pdf}&
-			\includegraphics[width=0.49\textwidth]{figures/cylinder_spalding_errors_RB_vs_time.pdf}
-		\end{tabular}
-	\end{center}
-\end{frame}
+%\begin{frame}{\highlight{POD-Galerkin} error: \highlightB{Test1}, $(u_{in},\nu)=(1,0.001)$}
+%	\begin{center}
+%		$N_{POD}^u=N_{POD}^p=100$, $\tau$ exact
+%		\begin{tabular}{cc}
+%			Weak BC& Spalding\\
+%			\includegraphics[width=0.49\textwidth]{figures/cylinder_weak_errors_RB_vs_time.pdf}&
+%			\includegraphics[width=0.49\textwidth]{figures/cylinder_spalding_errors_RB_vs_time.pdf}
+%		\end{tabular}
+%	\end{center}
+%\end{frame}
 
 
-\begin{frame}{\highlight{POD-Galerkin} error: \highlightB{Test2}, $(u_{in},\nu)=(1,2\cdot 10^{-6})$}
+\begin{frame}{\highlight{POD-Galerkin} error: $(u_{in},\nu)=(1,2\cdot 10^{-6})$}
 	\begin{center}
 		$N_{POD}^u=N_{POD}^p=100$, $\tau$ exact
 		\begin{tabular}{cc}
@@ -725,32 +725,32 @@ flashvars={source=figures/cylinder_turb_weak.avi
 
 
 
-\begin{frame}{\highlightB{Test1} \highlight{Weak} BC: POD-Galerkin (top) vs FOM (bottom)}
-	\includemedia[
-		width=0.98\linewidth,
-		height=0.8\textheight,
-		activate=pageopen,
-		addresource=figures/cylinder_weak_uROMvsFOM.avi,
-		flashvars={source=figures/cylinder_weak_uROMvsFOM.avi
-			&loop=true 
-			&autoPlay=true }
-		]{}{VPlayer.swf}
-\end{frame}
+%\begin{frame}{\highlightB{Test1} \highlight{Weak} BC: POD-Galerkin (top) vs FOM (bottom)}
+%	\includemedia[
+%		width=0.98\linewidth,
+%		height=0.8\textheight,
+%		activate=pageopen,
+%		addresource=figures/cylinder_weak_uROMvsFOM.avi,
+%		flashvars={source=figures/cylinder_weak_uROMvsFOM.avi
+%			&loop=true 
+%			&autoPlay=true }
+%		]{}{VPlayer.swf}
+%\end{frame}
+%
+%\begin{frame}{\highlightB{Test1} \highlight{Spalding} BC: POD-Galerkin (top) vs FOM (bottom)}
+%	\includemedia[
+%	width=0.98\linewidth,
+%	height=0.8\textheight,
+%	activate=pageopen,
+%	addresource=figures/cylinder_spalding_uROMvsFOM.avi,
+%	flashvars={source=figures/cylinder_spalding_uROMvsFOM.avi
+%		&loop=true 
+%		&autoPlay=true }
+%	]{}{VPlayer.swf}
+%\end{frame}
 
-\begin{frame}{\highlightB{Test1} \highlight{Spalding} BC: POD-Galerkin (top) vs FOM (bottom)}
-	\includemedia[
-	width=0.98\linewidth,
-	height=0.8\textheight,
-	activate=pageopen,
-	addresource=figures/cylinder_spalding_uROMvsFOM.avi,
-	flashvars={source=figures/cylinder_spalding_uROMvsFOM.avi
-		&loop=true 
-		&autoPlay=true }
-	]{}{VPlayer.swf}
-\end{frame}
 
-
-\begin{frame}{\highlightB{Test2} \highlight{Weak} BC: POD-Galerkin (top) vs FOM (bottom)}
+\begin{frame}{\highlight{Weak} BC: POD-Galerkin (top) vs FOM (bottom)}
 	\includemedia[
 	width=0.98\linewidth,
 	height=0.8\textheight,
@@ -762,7 +762,7 @@ flashvars={source=figures/cylinder_turb_weak.avi
 	]{}{VPlayer.swf}
 \end{frame}
 
-\begin{frame}{\highlightB{Test2} \highlight{Spalding} BC: POD-Galerkin (top) vs FOM (bottom)}
+\begin{frame}{\highlight{Spalding} BC: POD-Galerkin (top) vs FOM (bottom)}
 	\includemedia[
 	width=0.98\linewidth,
 	height=0.8\textheight,
@@ -795,19 +795,19 @@ flashvars={source=figures/cylinder_turb_weak.avi
 \end{block}}
 \only<2>{
 	\begin{center}
-	\Large Weak BC Test2 ROM from $t=0$
+	\Large Weak BC ROM from $t=0$
 \includegraphics[width=0.99\textwidth]{figures/cylinder_turb_weak_errors_RB_vs_time.pdf}
 	\end{center}
 }
 \only<3>{
 	\begin{center}
-		\Large Weak BC Test2 ROM from $t=1$
+		\Large Weak BC ROM from $t=1$
 		\includegraphics[width=0.99\textwidth]{figures/cylinder_turb_weak_later_errors_RB_vs_time.pdf}
 	\end{center}
 }
 \end{minipage}
 \only<4>{\begin{center} \vspace*{-8mm}
-	\Large Weak BC Test2 ROM from $t=1$
+	\Large Weak BC ROM from $t=1$
 		\includemedia[
 	width=0.98\linewidth,
 	height=0.8\textheight,
@@ -824,37 +824,6 @@ flashvars={source=figures/cylinder_turb_weak.avi
 %\includegraphics[width=0.31\textwidth]{figures/cylinder_turb_weak_later_errors_RB_vs_time.pdf}
 \end{frame}
 
-\begin{frame}{POD-NN}
-	\begin{minipage}{0.49\textwidth}
-		\begin{block}{POD-NN}
-			\begin{itemize}
-				\item Training set as POD: 20 params, 150 timesteps (3000 snapshots)
-				\item Goal: learn map $(t,\mu_0,\mu_1)\to u_{RB}$
-				\item NN setting 
-				\begin{itemize}
-					\item multi-layer perceptron 
-					\item 4 hidden nodes 
-					\item 100 neurons each
-					\item Various activation functions
-				\end{itemize}
-				\item For $u$ and $p$ the loss struggle at decaying
-				\item For $\tau$ already better results, but dangerous to be used alone (time consistency)
-			\end{itemize}
-		\end{block}
-	\end{minipage}\hfill
-	\begin{minipage}{0.49\textwidth}
-	\begin{block}{Prediction of $\tau$}
-		It might be safer to predict $\tau_B(u)$
-		\begin{itemize}
-			\item Learn $u_{RB}\to \tau_{B,RB}$
-			\item NN as before
-			\item Errors $\approx 6\%$ on a test set
-			\item Not really helpful in reducing the computational costs (solving for $\tau_B$ already cheap (1\% of all costs)
-			\item Still not physics based
-		\end{itemize}
-	\end{block}
-\end{minipage}
-\end{frame}
 
 
 \section{Conclusions}
@@ -872,7 +841,6 @@ flashvars={source=figures/cylinder_turb_weak.avi
 				\item Weak Boundary Conditions
 				\item Spalding Law
 				\item POD-Galerkin
-				\item POD-NN (just started)
 			\end{itemize}
 				
 		\end{beamercolorbox}
@@ -914,6 +882,38 @@ flashvars={source=figures/cylinder_turb_weak.avi
 \end{beamercolorbox}
 \end{frame}
 
+
+\begin{frame}[noframenumbering]{POD-NN}
+	\begin{minipage}{0.49\textwidth}
+		\begin{block}{POD-NN}
+			\begin{itemize}
+				\item Training set as POD: 20 params, 150 timesteps (3000 snapshots)
+				\item Goal: learn map $(t,\mu_0,\mu_1)\to u_{RB}$
+				\item NN setting 
+				\begin{itemize}
+					\item multi-layer perceptron 
+					\item 4 hidden nodes 
+					\item 100 neurons each
+					\item Various activation functions
+				\end{itemize}
+				\item For $u$ and $p$ the loss struggle at decaying
+				\item For $\tau$ already better results, but dangerous to be used alone (time consistency)
+			\end{itemize}
+		\end{block}
+	\end{minipage}\hfill
+	\begin{minipage}{0.49\textwidth}
+		\begin{block}{Prediction of $\tau$}
+			It might be safer to predict $\tau_B(u)$
+			\begin{itemize}
+				\item Learn $u_{RB}\to \tau_{B,RB}$
+				\item NN as before
+				\item Errors $\approx 6\%$ on a test set
+				\item Not really helpful in reducing the computational costs (solving for $\tau_B$ already cheap (1\% of all costs)
+				\item Still not physics based
+			\end{itemize}
+		\end{block}
+	\end{minipage}
+\end{frame}
 
 
 
