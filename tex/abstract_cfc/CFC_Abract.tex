@@ -1,0 +1,53 @@
+\documentclass{cfc2023}
+\usepackage{pslatex}
+%\usepackage{amsmath}
+%\usepackage{amsfonts}
+%\usepackage{amssymb}
+\thispagestyle{empty}
+
+\title{Reduced Order Models on a Variational Multi-Scale Model of Navier--Stokes}
+
+\author{Davide Torlo$^{*}$, Samuele Rubino$^{\dag}$ and Giovanni Stabile$^{\ddag}$}
+
+
+
+\address{$^{*}$ SISSA mathLab, SISSA International School for Advanced Studies,\\
+via Bonomea, 265, 34136 Trieste, Italy\\
+e-mail:  davide.torlo@sissa.it, web page: https://www.davidetorlo.it
+\and
+$^{\dag}$ Departamento EDAN \& IMUS,\\ Universidad de Sevilla, Campus de Reina Mercedes,
+41012, Sevilla, Spain \and 
+$^{\ddag}$ SISSA mathLab, SISSA International School for Advanced Studies,\\
+via Bonomea, 265, 34136 Trieste, Italy
+}
+
+\begin{document}
+\thispagestyle{empty}
+
+In this work, we study parametric incompressible flows given by Navier--Stokes equations. At the discrete level, we use continuous finite element (FE) method. 
+The discrete model relies on a variational multi-scale (VMS) approach, which separates the large, sub-filter and small scales. 
+The first two are resolved, while the last is not. 
+The model includes sub-grid eddy viscosity to take care of the interaction between sub-filter and small scales.
+A local projection stabilization (LPS) term is introduced onto the sub-filter terms to provide stability also in a FE context. 
+This term is based on interpolation and projection operators that penalizes the oscillations on the sub-filter scale\cite{Rebollo15,Ahmed17}.\\
+The computational costs of such simulations, though being faster than other models as the small scales are not resolved, are still large, in particular in the time dependent case.
+Moreover, dealing with parametric problems in a multi-query context, where hundreds or thousands of simulations are necessary, makes the computational burden unbearable.
+We propose a Galerkin projection of the equations onto a POD-generated reduced basis space as reduced order model (ROM).
+To take care of the nonlinearities of the problem, different hyper-reduction techniques are studied in order to obtain a reduced model that is independent of the dimension of the FE space. \\
+We provide simulations in two dimensions to validate the ROM and to prove the computational advantage of the approach.
+
+
+
+
+\begin{center}
+\begin{thebibliography}{99}
+\bibitem{Rebollo15} T.~C.~Rebollo, M.~G.~Mármol and S. Rubino. Numerical analysis of a finite element projection-based VMS
+turbulence model with wall laws. \emph{Comput. Methods Appl. Mech. Engrg.}, Vol. \textbf{285}, pp. 379--405, 2015.
+\bibitem{Ahmed17} N.~Ahmed, T.~C.~Rebollo, V.~John and S. Rubino. Analysis of a Full Space--Time Discretization of the Navier--Stokes Equations by a
+Local Projection Stabilization Method. \emph{IMA Journal of Numerical Analysis}, Vol. \textbf{37}, pp. 1437--1467, 2017.
+\end{thebibliography}
+\end{center}
+
+\end{document}
+
+

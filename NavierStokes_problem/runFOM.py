@@ -269,7 +269,7 @@ class Snapshots():
                 outxdmf_RB.read_checkpoint(up_tmp[ic],comp,i)
                 assign(up, [up_tmp[0],up_tmp[1]])
                 self.Z_comp[comp].enrich(up)
-        
+            outxdmf_RB.close()
             plt.figure()
             plt.semilogy(self.eigs[comp])
             plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
@@ -292,7 +292,7 @@ class Snapshots():
             plt.savefig(self.snap_folder+"/eigs_"+comp+".pdf")
             plt.close('all')
 
-        outxdmf_RB.close()
+            outxdmf_RB.close()
 
         # convert RB into matrix
         self.RB_mat = BasisFunctionsMatrix(W)
@@ -318,8 +318,8 @@ class Snapshots():
             lift_xdmf["p"].read_checkpoint(p_tmp ,"p",0)
             assign(self.lift, [u_tmp, p_tmp])
 
-        lift_xdmf["u"].close()
-        lift_xdmf["p"].close()
+            lift_xdmf["u"].close()
+            lift_xdmf["p"].close()
 
 
     def project_snapshots(self):

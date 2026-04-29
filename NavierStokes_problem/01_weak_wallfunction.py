@@ -20,6 +20,7 @@ from scipy.optimize import bisect
 
 giovanni = False
 boundary_tag = "strong"#"spalding"#"weak" #"strong" #  
+time_discretization = "Crank-Nicolson" #"BE" 
 
 parameters["linear_algebra_backend"] = "PETSc"
 args = "--petsc.snes_linesearch_monitor --petsc.snes_linesearch_type bt"
@@ -329,9 +330,9 @@ def strongResidual(u,p,nu,u_t,f):
 delta_x = 2*pi
 delta_y = 2
 delta_z = 2/3*pi
-rx = 5
-ry = 5
-rz = 5
+rx = 8
+ry = 12
+rz = 12
 Nx = int(rx*delta_x)
 Ny = int(ry*delta_y)
 Nz = int(rz*delta_z)
@@ -468,8 +469,8 @@ u_in = Expression(("u_max*4*x[2]*(delta_z-x[2])/delta_z/delta_z", "0.", "0."), t
 p_in = Expression('0', degree=1)
 # nu = Constant(u_bar*0.1/Re) # obtained from the definition of Re = u_bar * diam / nu. In our case diam = 0.1.
 
-dt = delta_x/Nx/u_max
-T = 200 * dt # should be 15 to generate the video
+dt = 10.*delta_x/Nx/u_max
+T = 1000 * dt # should be 15 to generate the video
 
 """### Function spaces"""
 pbc = PeriodicBoundary()
@@ -517,14 +518,14 @@ up = Function(W)
 
 """### <font color="red">Solution at the previous time</font>"""
 up_prev = Function(W)
-(u_prev, _) = split(up_prev)
+(u_prev, p_prev) = split(up_prev)
 up_bc = Function(W)
 (u_bc, _) = split(up_bc)
 
 ## BCs for weak boundaries and initial condition perturbation
-u_pert = Expression(('u_max*0.01*sin(25*x[2]*2*pi/delta_z)',\
-    '1e-3*u_max*sin(33*x[0]*2*pi/delta_x)',\
-    '1e-3*u_max*sin(41*x[0]*2*pi/delta_x)'), \
+u_pert = Expression(('u_max*0.2*sin(33*x[2]*2*pi/delta_z)*sin(37*x[1]*2*pi/delta_y)*sin(31*x[0]*2*pi/delta_x)',\
+    '1e-2*u_max*sin(33*x[0]*2*pi/delta_x)',\
+    '1e-2*u_max*sin(41*x[0]*2*pi/delta_x)*sin(37*x[1]*2*pi/delta_y)*sin(31*x[2]*2*pi/delta_z)'), \
     degree=4, u_max=u_max, delta_x=delta_x, delta_y=delta_y, delta_z=delta_z)
 
 #u_0 = interpolate(u_in, W.sub(0).collapse())
@@ -590,10 +591,17 @@ else:
     stab =  (inner( dot(u,2*sym(grad(v)))+grad(q), tau_M * r_M )
            + inner(div(v), tau_C * r_C ))*dx
 
-    F = (inner(u_t,v) - inner(outer(u,u), grad(v))- inner(f,v) # = inner(DuDt, v) 
-         + inner(div(u),q)  
-         - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
-        + stab
+    if time_discretization=="BE":
+        F = (inner(u_t,v) - inner(outer(u,u), grad(v))- inner(f,v) # = inner(DuDt, v) 
+            + inner(div(u),q)  
+            - inner(p,div(v)) + inner(2*nu*sym(grad(u)),sym(grad(v))) )*dx\
+            + stab
+    elif time_discretization =="Crank-Nicolson":
+        F = (inner(u_t,v) - 0.5*inner(outer(u,u), grad(v)) - 0.5*inner(outer(u_prev,u_prev), grad(v)) - inner(f,v) # = inner(DuDt, v) 
+            + inner(div(u),q)  
+            - 0.5*inner(p,div(v))- 0.5*inner(p_prev,div(v)) 
+            + inner(nu*sym(grad(u)),sym(grad(v)))+ inner(nu*sym(grad(u_prev)),sym(grad(v))) )*dx\
+            + stab
 
     if boundary_tag=="weak":
         F += weakHughesBC(u,p,u_prev,v,q,u_bc,nu,mesh,ds_bc, G=G, spalding=False)
@@ -652,10 +660,10 @@ for i in range(1, K):
     u_in.t = t
     # Solve the nonlinear problem
     # with pipes() as (out, err):
-    #solver.solve()
-    solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8,
-                                                            "absolute_tolerance":1e-8} })
-    # Store the solution in up_prev
+    solver.solve()
+    # solve(F == 0, up, bcs=bc, solver_parameters={"newton_solver":{"relative_tolerance":1e-8,
+    #                                                         "absolute_tolerance":1e-8} })
+    # # Store the solution in up_prev
     assign(up_prev, up)
     # Plot
     (u, p) = up.split()
